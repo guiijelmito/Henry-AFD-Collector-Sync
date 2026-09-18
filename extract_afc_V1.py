@@ -13,7 +13,7 @@ from config import (
     SLOW_MO_MS
 )
 
-ARQUIVO_ESTADO = "estado_v1.json"
+ARQUIVO_ESTADO = "estado_ponto.json"
 LOTE_SEMANAL = 146  # 7 func x 4 pontos x 5 dias + 6 de gordurinha
 
 def carregar_estado():
@@ -29,7 +29,7 @@ def salvar_estado(novo_nsr):
     print(f"[ESTADO] JSON atualizado com o novo NSR final: {novo_nsr}")
 
 def automatizar_download_afd_henry():
-    data_hoje = datetime.now().strftime("%Y-%m-%d")
+    data_hoje = datetime.now().strftime("%d-%m-%Y")
 
     # 1. Leitura dinâmica do último NSR salvo
     nsr_inicial_str = carregar_estado()
