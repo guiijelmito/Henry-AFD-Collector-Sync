@@ -11,7 +11,7 @@ Automated Python service designed to extract **AFD (Arquivo Fonte de Dados)** fi
 ## Key Features
 
 - **Resilient Web Automation:** Uses Playwright to interact with Henry's web panel, handling authentication, sessions, and precise element selectors.
-- **Dynamic NSR State Management (`estado_v1.json`):** Automatically calculates batch ranges per execution cycle, ensuring continuous data collection without gaps or overlaps.
+- **Dynamic NSR State Management (`estado_ponto.json`):** Automatically calculates batch ranges per execution cycle, ensuring continuous data collection without gaps or overlaps.
 - **Secure Configuration:** Isolates sensitive credentials and device IPs using environment variables (`.env`).
 - **Structured Storage:** Automatically saves extracted AFD files into a dedicated target directory (`afd_downloads/`).
 - **Backend Integration:** Designed to seamlessly feed extracted data into a PHP backend server and cloud infrastructure.
