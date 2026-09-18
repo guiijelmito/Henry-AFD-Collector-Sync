@@ -105,6 +105,7 @@ def automatizar_download_afd_henry():
         time.sleep(3)
         browser.close()
         print("Automação finalizada.")
+        return caminho_salvo  # Retorna o caminho do arquivo baixado para uso posterior
 
 if __name__ == "__main__":
     automatizar_download_afd_henry()

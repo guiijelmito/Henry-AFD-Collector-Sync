@@ -49,7 +49,7 @@ def enviar_afd_para_servidor(caminho_arquivo_afd: str):
             # Passo 2: Clicar na aba "Upload de registros" (já visível)
             print("Navegando para a aba 'Upload de registros'...")
             page.locator("span:has-text('Upload de registros')").click()
-
+        
             # Passo 3: Inserir o arquivo no input type="file" escondido
             # O Playwright lida perfeitamente com inputs file ocultos via set_input_files
             print("Selecionando o arquivo AFD...")
