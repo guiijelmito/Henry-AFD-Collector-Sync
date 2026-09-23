@@ -10,7 +10,7 @@ load_dotenv()
 SERVER_URL = os.getenv("SERVER_URL")
 SERVER_USER = os.getenv("SERVER_USER")
 SERVER_PASSWORD = os.getenv("SERVER_PASSWORD")
-caminho_exemplo_afd = Path(os.getenv("caminho_exemplo_afd")) as caminho_arquivo_afd
+caminho_exemplo_afd = Path(os.getenv("caminho_exemplo_afd"))    
 
 def enviar_afd_para_servidor(caminho_arquivo_afd: str):
     """

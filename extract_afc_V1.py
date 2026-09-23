@@ -19,11 +19,11 @@ LOTE_SEMANAL = 146  # 7 func x 4 pontos x 5 dias + 6 de gordurinha
 def carregar_estado():
     if os.path.exists(ARQUIVO_ESTADO):
         with open(ARQUIVO_ESTADO, "r") as f:
-            return json.load(f).get("ultimo_nsr", "000044930")
+            return json.load(f).get("ultimo_nsr_v1", "000044930")
     return "000044930"
 
 def salvar_estado(novo_nsr):
-    dados = {"ultimo_nsr": novo_nsr}
+    dados = {"ultimo_nsr_v1": novo_nsr}
     with open(ARQUIVO_ESTADO, "w") as f:
         json.dump(dados, f, indent=4)
     print(f"[ESTADO] JSON atualizado com o novo NSR final: {novo_nsr}")
@@ -85,7 +85,7 @@ def automatizar_download_afd_henry():
                 page.locator("a[onclick*='subCompD(5, 8, 1);']").click()
             
             download = download_info.value
-            nome_arquivo = f"afd_nsr_{NSR_INICIAL}_a_{NSR_FINAL}_{data_hoje}.txt"
+            nome_arquivo = f"AFD_V1_{NSR_INICIAL}_a_{NSR_FINAL}_{data_hoje}.txt"
             caminho_salvo = os.path.join(DIRETORIO_DOWNLOADS, nome_arquivo)
             
             download.save_as(caminho_salvo)
