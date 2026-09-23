@@ -55,11 +55,23 @@ playwright install chromium
 Create a `.env` file in the root directory based on your clock settings:
 
 ```env
-IP_V1=192.168.X.XXX
-USUARIO_V1=rep
-SENHA_V1=your_password_here
-HEADLESS_MODE=False
-SLOW_MO_MS=500
+SERVER_URL=http://192.168.1.100/painel_ponto/login.php
+SERVER_USER=admin_verth
+SERVER_PASSWORD=sua_senha_segura_aqui
+
+IP_V1 = 192.168.X.XXX
+USUARIO_V1 = your_user_here
+SENHA_V1 = your_password_here
+
+IP_V2=192.168.X.XXX
+USUARIO_V2=your_user_here
+SENHA_V2=your_password_here
+
+DIRETORIO_BASE=/caminho/para/o/seu/projeto/ponto_eletronico_automazido/
+DIRETORIO_DOWNLOADS=/caminho/para/a/pasta/de/downloads/
+
+HEADLESS_MODE = False
+SLOW_MO_MS = 500
 ```
 
 ### 5. Initialize state file
@@ -79,7 +91,7 @@ Ensure `estado_ponto.json` exists in the root directory with your initial NSR po
 Run the main automation script:
 
 ```bash
-python extract_afc_V1.py
+python main.py
 ```
 
 ---
@@ -87,13 +99,16 @@ python extract_afc_V1.py
 ## Project Structure
 
 ```
-├── afd_downloads/       # Directory where downloaded AFD text files are stored
-├── .env                 # Sensitive credentials (git-ignored)
-├── .gitignore            # Excludes venv, .env, state files, and downloads
-├── config.py             # Configuration loader and environment bindings
-├── estado_ponto.json        # Dynamic state tracker for the last processed NSR
-├── extract_afc_V1.py     # Main Playwright automation script
-└── README.md             # Project documentation
+├── afd_downloads/         # Directory where downloaded AFD text files are stored
+├── .env                   # Sensitive credentials and URLs (git-ignored)
+├── .gitignore             # Excludes venv, .env, state files, and downloads
+├── config.py              # Configuration loader and environment variables bindings
+├── estado_ponto.json      # Dynamic state tracker for the last processed NSR
+├── extract_afc_v1.py      # Playwright automation script for Unit V1 (Local)
+├── extract_afc_v2.py      # Playwright automation script for Unit V2 (External via Tailscale)
+├── cloud.py               # Synchronization and automated web server upload module
+├── main.py                # Unified central orchestrator for the complete pipeline
+└── README.md              # Official project documentation
 ```
 
 ---
