@@ -28,20 +28,18 @@ def salvar_estado(novo_nsr):
         json.dump(dados, f, indent=4)
     print(f"[ESTADO] JSON atualizado com o novo NSR final: {novo_nsr}")
 
-def automatizar_download_afd_henry():
+def automatizar_download_afd_v1():
     data_hoje = datetime.now().strftime("%d-%m-%Y")
 
-    # 1. Leitura dinâmica do último NSR salvo
     nsr_inicial_str = carregar_estado()
     nsr_inicial_int = int(nsr_inicial_str)
     
-    # 2. Cálculo dinâmico do NSR final da execução atual
     nsr_final_int = nsr_inicial_int + LOTE_SEMANAL
     
     NSR_INICIAL = f"{nsr_inicial_int:09d}"
     NSR_FINAL = f"{nsr_final_int:09d}"
 
-    print(f"--- INICIANDO CICLO DE COLETA ---")
+    print(f"--- INICIANDO CICLO DE COLETA V1 ---")
     print(f"Intervalo calculado: De {NSR_INICIAL} até {NSR_FINAL}")
 
     with sync_playwright() as p:
@@ -52,7 +50,6 @@ def automatizar_download_afd_henry():
         page.goto(URL_V1)
         page.wait_for_load_state("networkidle")
 
-        # Verifica se estamos na tela de login
         if page.locator("#lblLogin").is_visible():
             print("Tela de login detectada. Preenchendo credenciais...")
             page.locator("#lblLogin").fill(USUARIO_V1)
@@ -63,26 +60,31 @@ def automatizar_download_afd_henry():
         else:
             print("Sessão já estava logada. Pulando etapa de login...")
 
-        # Navegando até o Menu "Download"
         print("Navegando para o menu de Download...")
-        page.locator("a[onclick*='subComp(0, 8, 0)']").nth(1).click()
+        menu_download = page.locator("a[onclick*='subComp(0, 8, 0)']").nth(1)
+        menu_download.wait_for(state="visible", timeout=15000)
+        menu_download.click()
         page.wait_for_load_state("networkidle")
 
-        # Selecionando a opção "Filtro por NSR"
         print("Selecionando o Filtro por NSR...")
-        page.locator("a[onclick*=\"navigationsa('visibleDiv', 'geral')\"]").click()
+        filtro_nsr = page.locator("a[onclick*=\"navigationsa('visibleDiv', 'geral')\"]")
+        filtro_nsr.wait_for(state="visible", timeout=15000)
+        filtro_nsr.click()
         page.wait_for_load_state("networkidle")
 
-        # Inserindo o range de NSR dinâmico
         print(f"Inserindo range nos inputs...")
+        page.locator("#lblNsrI").wait_for(state="visible", timeout=10000)
         page.locator("#lblNsrI").fill(NSR_INICIAL)
         page.locator("#lblNsrF").fill(NSR_FINAL)
 
-        # Interceptando o download e salvando na pasta de downloads
         print("Disparando o salvamento dos dados...")
         try:
-            with page.expect_download(timeout=10000) as download_info:
-                page.locator("a[onclick*='subCompD(5, 8, 1);']").click()
+            botao_baixar = page.locator("a[onclick*='subCompD(5, 8, 1);']")
+            botao_baixar.scroll_into_view_if_needed()
+            botao_baixar.wait_for(state="visible", timeout=10000)
+
+            with page.expect_download(timeout=15000) as download_info:
+                botao_baixar.click()
             
             download = download_info.value
             nome_arquivo = f"AFD_V1_{NSR_INICIAL}_a_{NSR_FINAL}_{data_hoje}.txt"
@@ -90,22 +92,19 @@ def automatizar_download_afd_henry():
             
             download.save_as(caminho_salvo)
             print(f"[SUCESSO] Arquivo AFD baixado e salvo em: {caminho_salvo}")
-            
-            # 3. Sucesso no download? Atualiza o estado para a próxima iteração!
             salvar_estado(NSR_FINAL)
             
         except Exception as e:
-            print(f"Tentando clique direto: {e}")
-            page.locator("a[onclick*='subCompD(5, 8, 1);']").click()
+            print(f"Tentando clique direto via fallback: {e}")
+            page.locator("a[onclick*='subCompD(5, 8, 1);']").click(force=True)
             time.sleep(5)
             print("Ação de salvamento concluída.")
-            # Atualiza o estado mesmo no fallback se a ação concluiu
             salvar_estado(NSR_FINAL)
 
         time.sleep(3)
         browser.close()
-        print("Automação finalizada.")
-        return caminho_salvo  # Retorna o caminho do arquivo baixado para uso posterior
+        print("Automação V1 finalizada.")
+        return caminho_salvo
 
 if __name__ == "__main__":
-    automatizar_download_afd_henry()
+    automatizar_download_afd_v1()
