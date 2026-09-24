@@ -8,7 +8,7 @@ Automated Python service designed to extract **AFD (Arquivo Fonte de Dados)** fi
 
 ---
 
-## Key Features
+## 🚀 Key Features
 
 - **Resilient Web Automation:** Uses Playwright to interact with Henry's web panel, handling authentication, sessions, and precise element selectors.
 - **Dynamic NSR State Management (`estado_ponto.json`):** Automatically calculates batch ranges per execution cycle, ensuring continuous data collection without gaps or overlaps.
@@ -18,7 +18,7 @@ Automated Python service designed to extract **AFD (Arquivo Fonte de Dados)** fi
 
 ---
 
-## Tech Stack
+## 🛠️ Tech Stack
 
 - **Language:** Python 3.10+
 - **Automation:** Playwright for Python
@@ -27,7 +27,7 @@ Automated Python service designed to extract **AFD (Arquivo Fonte de Dados)** fi
 
 ---
 
-## Installation & Setup
+## ⚙️ Installation & Setup
 
 ### 1. Clone the repository
 
@@ -96,7 +96,7 @@ python main.py
 
 ---
 
-## Project Structure
+## 🗂️ Project Structure
 
 ```
 ├── afd_downloads/         # Directory where downloaded AFD text files are stored
@@ -108,11 +108,12 @@ python main.py
 ├── extract_afc_v2.py      # Playwright automation script for Unit V2 (External via Tailscale)
 ├── cloud.py               # Synchronization and automated web server upload module
 ├── main.py                # Unified central orchestrator for the complete pipeline
+├── executar.bat           # Windows wrapper script for automated background task scheduling
 └── README.md              # Official project documentation
 ```
 
 ---
 
-## License
+## ⚖️ License
 
 This project is proprietary software developed for **Verth Tecnologia**.

@@ -24,5 +24,5 @@ DIRETORIO_DOWNLOADS = os.path.join(DIRETORIO_BASE, "afd_downloads")
 os.makedirs(DIRETORIO_DOWNLOADS, exist_ok=True)
 
 # --- CONFIGURAÇÕES DO PLAYWRIGHT ---
-HEADLESS_MODE = os.getenv("HEADLESS_MODE", "False").lower() in ("true", "1", "t")
+HEADLESS_MODE = os.getenv("HEADLESS_MODE").lower() in ("true", "1", "t")
 SLOW_MO_MS = int(os.getenv("SLOW_MO_MS", "500"))
