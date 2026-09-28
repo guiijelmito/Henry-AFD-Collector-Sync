@@ -1,15 +1,15 @@
+:: Executa o script Python principal do projeto de automação de ponto eletrônico via agendamento de tarefas Windows.
 @echo off
-:: Navega automaticamente para a pasta onde este arquivo .bat está salvo
-cd /d "%~dp0"
 
-:: Ativa o ambiente virtual
+:: Muda o diretório para o local do projeto
+cd /d "C:\Users\Leticia\Documents\Dev-Verth\Automações\ponto_eletronico_automazido"
+
+:: Ativa o ambiente virtual do Python
 call venv\Scripts\activate
 
-:: Executa o script principal de extração/envio
-python main.py
+:: Executa o script Python principal e redireciona a saída para um arquivo de log
+python main.py > log.txt 2>&1
 
-:: Aguarda a conclusão do script antes de continuar
-pause
-
-:: Desativa o ambiente (opcional, boa prática)
-deactivate
+:: Exibe uma mensagem indicando que a execução foi concluída e fecha o terminal
+echo Execução concluída. Verifique log_execucao.txt para detalhes. 
+exit

@@ -2,7 +2,7 @@ from playwright.sync_api import sync_playwright
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from config import (
     URL_V1, 
@@ -25,9 +25,9 @@ def carregar_estado(versao="v1"):
             with open(ARQUIVO_ESTADO, "r") as f:
                 dados = json.load(f)
                 if versao == "v1":
-                    return dados.get("ultimo_nsr_v1")
+                    return dados.get("last_nsr_v1")
                 else:
-                    return dados.get("ultimo_nsr_v2")
+                    return dados.get("last_nsr_v2")
         except json.JSONDecodeError:
             # Silencia e prossegue para o retorno padrão caso o JSON esteja corrompido
             pass 
@@ -46,10 +46,28 @@ def salvar_estado(novo_nsr, versao="v1"):
             dados = {}
             
     # Atribui o novo NSR à chave da versão correspondente
-    chave = f"ultimo_nsr_{versao}"
-    dados[chave] = novo_nsr
+    chave = f"last_nsr_{versao}"
     
-    # Persiste o dicionário atualizado no disco
+    data_coleta = dados.get("next_date")
+    data_hoje = datetime.now().strftime("%Y-%m-%d")
+    
+    if str(data_hoje).strip() == str(data_coleta).strip():
+        print("Data da coleta")
+        dados[chave] = novo_nsr
+        
+        proxima_data = data_hoje + timedelta(days=7)
+        dados["next_date"] = proxima_data.strftime("%Y-%m-%d")
+        
+        # Persiste o dicionário atualizado no disco
+        with open(ARQUIVO_ESTADO, "w") as f:
+            json.dump(dados, f, indent=4)
+        print(f"[ESTADO] JSON atualizado com sucesso ({chave}): {novo_nsr}")
+        
+    else:
+        print("Fora da época para coleta")
+        return
+    
+    # Persiste o dicionári'o atualizado no disco
     with open(ARQUIVO_ESTADO, "w") as f:
         json.dump(dados, f, indent=4)
     print(f"[ESTADO] JSON atualizado com sucesso ({chave}): {novo_nsr}")
@@ -76,25 +94,41 @@ def automatizar_download_afd_v1():
         page.goto(URL_V1)
         page.wait_for_load_state("networkidle")
 
-        # Gerenciamento de sessão: valida se a tela de login é exibida ou se já estamos autenticados
+# Gerenciamento de sessão: valida se a tela de login é exibida ou se já estamos autenticados
         try:
-            if page.locator("#lblLogin").is_visible(timeout=3000):
-                print("Tela de login detectada...")
-            else:
-                raise Exception("Elemento de login não visível no DOM.")
-        except: 
-            print("Sessão possivelmente ativa ou expirada, recarregando contexto...")
-            page.reload()
+            print("Verificando estado da sessão...")
+            
+            # Tenta esperar pelo campo de login por até 5 segundos
+            page.locator("#lblLogin").wait_for(state="visible", timeout=5000)
+            print("Tela de login detectada...")
+            
+            # Inserção de credenciais de acesso
+            print("Preenchendo credenciais...")
+            page.locator("#lblLogin").fill(USUARIO_V1)  
+            page.locator("#lblPass").fill(SENHA_V1)
+            print("Executando login...")
+            page.locator("a:has-text('Entrar')").click()
             page.wait_for_load_state("networkidle")
-
-        # Inserção de credenciais de acesso
-        print("Preenchendo credenciais...")
-        page.locator("#lblLogin").fill(USUARIO_V1)  
-        page.locator("#lblPass").fill(SENHA_V1)
-
-        print("Executando login...")
-        page.locator("a:has-text('Entrar')").click()
-        page.wait_for_load_state("networkidle")
+            
+        except Exception:
+            # Se o campo de login não apareceu em 5 segundos, assume que já está logado 
+            # ou valida se o elemento interno da home está visível
+            try:
+                print("Campo de login não visível. Validando se a sessão já está ativa...")
+                page.locator("a[onclick*='subComp(0, 8, 0)']").nth(1).wait_for(state="visible", timeout=5000)
+                print("Sessão já autenticada com sucesso.")
+            except Exception as e:
+                print(f"Sessão expirada ou estado inesperado ({e}), recarregando a página...")
+                page.reload()
+                page.wait_for_load_state("networkidle")
+                
+                # Segunda tentativa de login pós-reload por segurança
+                if page.locator("#lblLogin").is_visible():
+                    print("Preenchendo credenciais após recarregar...")
+                    page.locator("#lblLogin").fill(USUARIO_V1)  
+                    page.locator("#lblPass").fill(SENHA_V1)
+                    page.locator("a:has-text('Entrar')").click()
+                    page.wait_for_load_state("networkidle")
 
         # Navegação estruturada até o menu de download de arquivos fiscais
         print("Navegando para o menu de Download...")
