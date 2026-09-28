@@ -2,6 +2,7 @@
 venv/
 env/
 ENV/
+logs/
 .venv/
 __pycache__/
 *.py[cod]

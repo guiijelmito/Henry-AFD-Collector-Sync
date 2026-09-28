@@ -7,8 +7,7 @@ cd /d "C:\Users\Leticia\Documents\Dev-Verth\Automações\ponto_eletronico_automa
 :: Ativa o ambiente virtual do Python
 call venv\Scripts\activate
 
-:: Executa o script Python principal e redireciona a saída para um arquivo de log
-python main.py > log.txt 2>&1
+python main.py
 
 :: Exibe uma mensagem indicando que a execução foi concluída e fecha o terminal
 echo Execução concluída. Verifique log_execucao.txt para detalhes. 
