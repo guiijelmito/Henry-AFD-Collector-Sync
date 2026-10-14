@@ -98,16 +98,29 @@ def test_nsr_normalization_keeps_values_longer_than_nine_digits():
     assert normalize_nsr("1000000000") == "1000000000"
 
 
-def test_first_successful_upload_starts_window_without_advancing_cursor(tmp_path):
+def test_existing_cursor_without_window_is_blocked_for_safety(tmp_path):
     state_path = tmp_path / "state.json"
     state_path.write_text('{"last_nsr_v1": "100"}', encoding="utf-8")
     now = datetime(2026, 10, 13, 15, tzinfo=timezone(timedelta(hours=-3)))
 
-    advanced = advance_nsr_after_upload(state_path, "v1", "246", now)
+    with pytest.raises(StateIntegrityError, match="upload bloqueado"):
+        is_nsr_advance_due(state_path, "v1", now)
+    with pytest.raises(StateIntegrityError, match="upload bloqueado"):
+        advance_nsr_after_upload(state_path, "v1", "246", now)
 
     data = json.loads(state_path.read_text(encoding="utf-8"))
-    assert not advanced
-    assert data["last_nsr_v1"] == "100"
+    assert data == {"last_nsr_v1": "100"}
+
+
+def test_new_state_allows_first_cycle_and_stores_window_after_upload(tmp_path):
+    state_path = tmp_path / "state.json"
+    now = datetime(2026, 10, 13, 15, tzinfo=timezone(timedelta(hours=-3)))
+
+    assert is_nsr_advance_due(state_path, "v1", now)
+    assert advance_nsr_after_upload(state_path, "v1", "45222", now)
+
+    data = json.loads(state_path.read_text(encoding="utf-8"))
+    assert data["last_nsr_v1"] == "000045222"
     assert data["next_advance_at_v1"] == "2026-10-20T15:00:00-03:00"
 
 
@@ -177,7 +190,7 @@ def test_legacy_v1_next_date_is_treated_as_due_date_and_migrated(tmp_path):
     assert data["next_advance_at_v1"] == (now + timedelta(days=7)).isoformat()
 
 
-def test_v2_has_an_independent_window(tmp_path):
+def test_existing_v2_cursor_without_window_is_blocked_independently_of_v1(tmp_path):
     state_path = tmp_path / "state.json"
     now = datetime(2026, 10, 13, 15, tzinfo=timezone.utc)
     state_path.write_text(
@@ -192,13 +205,15 @@ def test_v2_has_an_independent_window(tmp_path):
     )
 
     assert not is_nsr_advance_due(state_path, "v1", now)
-    assert not is_nsr_advance_due(state_path, "v2", now)
-    assert not advance_nsr_after_upload(state_path, "v2", "346", now)
+    with pytest.raises(StateIntegrityError, match="upload bloqueado"):
+        is_nsr_advance_due(state_path, "v2", now)
+    with pytest.raises(StateIntegrityError, match="upload bloqueado"):
+        advance_nsr_after_upload(state_path, "v2", "346", now)
 
     data = json.loads(state_path.read_text(encoding="utf-8"))
     assert data["last_nsr_v1"] == "100"
     assert data["last_nsr_v2"] == "200"
-    assert data["next_advance_at_v2"] == (now + timedelta(days=7)).isoformat()
+    assert "next_advance_at_v2" not in data
 
 
 def test_v2_advances_its_cursor_without_touching_v1_or_legacy_key(tmp_path):

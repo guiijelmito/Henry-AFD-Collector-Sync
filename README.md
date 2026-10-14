@@ -69,19 +69,23 @@ Ensure `estado_ponto.json` exists in the root directory with your initial NSR po
 {
   "last_nsr_v1": "000045076",
   "last_nsr_v2": "000001153",
-  "next_advance_at_v1": null,
-  "next_advance_at_v2": null
+  "next_advance_at_v1": "2000-01-01T00:00:00-03:00",
+  "next_advance_at_v2": "2000-01-01T00:00:00-03:00"
 }
 ```
 
-Each clock has an independent weekly cursor window. Every run downloads and uploads
-the current 146-NSR block; the panel replaces records with matching NSRs, allowing
-the same block to be synchronized repeatedly. After the upload automation returns
-without error and the window is due, the cursor advances by 146 and the next window
-is scheduled seven days from that successful run. A late run remains eligible.
-When a clock has no window timestamp, its first successful upload starts the
-seven-day interval without advancing the cursor. The legacy `next_date` field is
-still read as the V1 due date and removed when the V1 window is next advanced.
+Each clock has an independent weekly window. Before the due time, the pipeline
+skips both extraction and upload, preserving any manual changes made on the
+server after the prior upload. At or after the due time, it downloads and uploads
+the current 146-NSR block; after the upload automation returns without error, the
+cursor advances by 146 and the next window is scheduled seven days from that run.
+A late run remains eligible. If a clock has no window timestamp, its first cycle
+is eligible only when it has no saved cursor. An existing cursor without a
+window timestamp blocks extraction and upload until the timestamp is configured,
+so a missing schedule cannot overwrite manual server changes. For an existing
+installation, set each timestamp to the last successful upload plus seven days.
+The legacy `next_date` field is still read as the V1 due date and removed when
+the V1 window is next advanced.
 
 A missing state file starts from the configured defaults; malformed JSON or a
 nonnumeric cursor stops collection so the automation cannot silently reset to an

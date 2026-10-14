@@ -96,10 +96,10 @@ def is_nsr_advance_due(
 ) -> bool:
     """Informa se o cursor da unidade já pode avançar pela janela semanal.
 
-    A data legada ``next_date`` é aceita como vencimento da V1. Sem uma data
-    configurada, o avanço ainda não está liberado; a primeira gravação bem-
-    sucedida apenas inicia a janela. Datas ISO sem horário são interpretadas
-    como início do dia no fuso local; novos valores contêm horário e offset UTC.
+    A data legada ``next_date`` é aceita como vencimento da V1. Sem uma data,
+    um relógio sem cursor salvo está em sua primeira coleta; um cursor existente
+    sem janela causa erro e bloqueia o envio até a configuração explícita.
+    Datas ISO sem horário são interpretadas como início do dia no fuso local.
     """
     if version not in {"v1", "v2"}:
         raise ValueError(f"Versão de relógio desconhecida: {version}")
@@ -113,7 +113,15 @@ def is_nsr_advance_due(
     if value is None and version == "v1":
         value = data.get("next_date")
     if value is None:
-        return False
+        cursor = data.get(f"last_nsr_{version}")
+        if cursor is None and version == "v1":
+            cursor = data.get("ultimo_nsr")
+        if cursor is None:
+            return True
+        raise StateIntegrityError(
+            f"Janela semanal do relógio {version.upper()} ausente; upload bloqueado "
+            "até configurar o próximo horário permitido"
+        )
     if not isinstance(value, str):
         raise StateIntegrityError("O horário de avanço deve ser texto ISO-8601")
 
@@ -155,14 +163,6 @@ def advance_nsr_after_upload(
 
     data = load_state_data(path)
     schedule_key = f"next_advance_at_{version}"
-    schedule_value = data.get(schedule_key)
-    if schedule_value is None and version == "v1":
-        schedule_value = data.get("next_date")
-
-    if schedule_value is None:
-        data[schedule_key] = (current_time + timedelta(days=7)).isoformat(timespec="seconds")
-        write_state_data(path, data)
-        return False
 
     if not is_nsr_advance_due(path, version, current_time):
         return False

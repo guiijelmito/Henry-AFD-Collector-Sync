@@ -1,10 +1,9 @@
 """Extrai arquivos AFD do relógio de ponto V1.
 
 O cursor salvo define o início de um bloco fixo de NSRs. Cada execução baixa e
-envia novamente esse bloco; como o painel substitui registros pelo NSR, isso
-sincroniza os dados sem duplicá-los. O cursor só avança após o envio e quando
-a janela semanal individual da V1 venceu. Falhas mantêm o cursor para que o
-mesmo bloco possa ser tentado novamente.
+envia o bloco quando a janela semanal da V1 vence. Fora da janela, o pipeline
+não acessa o relógio nem envia arquivo ao servidor, preservando edições manuais.
+Falhas mantêm o cursor para que o mesmo bloco possa ser tentado novamente.
 """
 
 import logging
@@ -28,6 +27,7 @@ from logging_config import capturar_screenshot
 from state_store import (
     StateIntegrityError,
     advance_nsr_after_upload,
+    is_nsr_advance_due,
     load_nsr,
 )
 
@@ -57,7 +57,8 @@ def salvar_estado(novo_nsr, versao="v1"):
 
     A data é verificada como próximo horário permitido. Execuções atrasadas
     continuam elegíveis; execuções dentro da janela deixam o cursor intacto.
-    Se o estado ainda não tem uma janela, inicia a contagem de sete dias.
+    Um estado inicial sem cursor avança no primeiro upload; cursores existentes
+    sem horário de janela ficam bloqueados pelo pipeline até serem configurados.
     """
     logger.debug("Salvando estado | versao=%s novo_nsr=%s", versao, novo_nsr)
     if not advance_nsr_after_upload(
@@ -74,6 +75,11 @@ def salvar_estado(novo_nsr, versao="v1"):
     logger.info("Estado atualizado (last_nsr_%s=%s)", versao, novo_nsr)
 
 
+def janela_semanal_vencida():
+    """Informa se o pipeline pode executar a coleta e o upload da V1."""
+    return is_nsr_advance_due(ARQUIVO_ESTADO, "v1", datetime.now().astimezone())
+
+
 def registrar_upload_enviado():
     """Confirma no estado o lote enviado quando a janela permite avançar."""
     nsr_atual = int(carregar_estado("v1"))
@@ -81,7 +87,7 @@ def registrar_upload_enviado():
 
 
 def automatizar_download_afd_v1():
-    """Baixa o bloco AFD V1 atual; o pipeline o envia antes de atualizar o cursor."""
+    """Baixa o próximo bloco AFD V1; o pipeline verifica a janela antes de chamar."""
     validar_configuracao_relogio("v1")
     Path(DIRETORIO_DOWNLOADS).mkdir(parents=True, exist_ok=True)
     inicio = time.perf_counter()
