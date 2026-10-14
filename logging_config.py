@@ -3,13 +3,19 @@
 - Console: formato enxuto e colorido (desenvolvimento/CLI), nível via LOG_LEVEL (padrão INFO).
 - Arquivo: RotatingFileHandler com milissegundos, módulo, função e linha (produção), sempre DEBUG.
 - Exceções não tratadas são registradas como CRITICAL com traceback completo.
+
+O diretório de logs também recebe screenshots de diagnóstico. Esses arquivos
+podem conter dados exibidos pelo relógio ou pelo painel e devem ter acesso
+restrito.
 """
+
 import logging
 import os
 import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import ClassVar
 
 env_base = os.getenv("DIRETORIO_BASE")
 DIRETORIO_BASE = Path(env_base) if env_base else Path(__file__).resolve().parent
@@ -21,28 +27,30 @@ SCREENSHOT_DIR = LOG_DIR / "screenshots"
 CONSOLE_FORMAT = "%(asctime)s [%(levelname)s] [%(filename)s:%(lineno)d] - %(message)s"
 CONSOLE_DATEFMT = "%d/%m/%Y - %H:%M:%S"
 FILE_FORMAT = (
-    "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s | "
-    "%(funcName)s:%(lineno)d | %(message)s"
+    "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s | %(funcName)s:%(lineno)d | %(message)s"
 )
 FILE_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
 
 class ColorFormatter(logging.Formatter):
     """Formatter de console com cor por nível (desativa se não for TTY)."""
 
     RESET = "\033[0m"
-    COLORS = {
-        "DEBUG": "\033[36m",     # ciano
-        "INFO": "\033[32m",      # verde
-        "WARNING": "\033[33m",   # amarelo
-        "ERROR": "\033[31m",     # vermelho
+    COLORS: ClassVar[dict[str, str]] = {
+        "DEBUG": "\033[36m",  # ciano
+        "INFO": "\033[32m",  # verde
+        "WARNING": "\033[33m",  # amarelo
+        "ERROR": "\033[31m",  # vermelho
         "CRITICAL": "\033[1;41m",  # branco sobre vermelho
     }
 
     def __init__(self, fmt, datefmt, use_color=True):
+        """Define o formato e se os códigos ANSI serão aplicados ao console."""
         super().__init__(fmt, datefmt)
         self.use_color = use_color
 
     def format(self, record):
+        """Formata o nível com cor temporariamente, sem alterar o registro."""
         original = record.levelname
         if self.use_color:
             record.levelname = f"{self.COLORS.get(original, '')}{original}{self.RESET}"
@@ -53,6 +61,7 @@ class ColorFormatter(logging.Formatter):
 
 
 def _log_uncaught(exc_type, exc_value, exc_tb):
+    """Registra exceções fatais; deixa Ctrl+C seguir o tratamento padrão."""
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_tb)
         return
@@ -93,7 +102,8 @@ def setup_logging() -> logging.Logger:
 def capturar_screenshot(page, tag: str, logger: logging.Logger | None = None):
     """Salva um screenshot de diagnóstico da página (uso em falhas do Playwright).
 
-    Atenção: o screenshot pode conter dados sensíveis; restrinja o acesso a LOG_DIR.
+    O screenshot pode conter dados sensíveis; restrinja o acesso a ``LOG_DIR``.
+    Retorna o caminho gravado ou ``None`` se a captura falhar.
     """
     log = logger or logging.getLogger(__name__)
     try:

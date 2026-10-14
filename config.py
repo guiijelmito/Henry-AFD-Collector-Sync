@@ -1,28 +1,68 @@
+"""Carrega e valida a configuração compartilhada pelas automações.
+
+As variáveis são lidas uma vez durante a importação, depois de carregar o
+arquivo ``.env``. Os módulos consumidores usam esses valores para configurar
+caminhos, credenciais e o comportamento do Chromium.
+"""
+
+from __future__ import annotations
+
 import os
-from datetime import datetime
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-# Carrega as variáveis do arquivo .env
 load_dotenv()
 
-# --- CREDENCIAIS E CONEXÃO DO RELÓGIO DA UNIDADE V1 ---
-# Dados sensíveis puxados obrigatoriamente do .env (sem valores hardcoded)
-IP_V1 = os.getenv("IP_V1")
-URL_V1 = f"http://{IP_V1}"
+BASE_DIR = Path(__file__).resolve().parent
+DIRETORIO_BASE = Path(os.getenv("DIRETORIO_BASE") or BASE_DIR).expanduser()
+DIRETORIO_DOWNLOADS = Path(
+    os.getenv("DIRETORIO_DOWNLOADS") or DIRETORIO_BASE / "afd_downloads"
+).expanduser()
+
+
+def _url_do_relogio(nome_ip: str) -> str | None:
+    endereco = os.getenv(nome_ip, "").strip()
+    return f"http://{endereco}" if endereco else None
+
+
+URL_V1 = _url_do_relogio("IP_V1")
 USUARIO_V1 = os.getenv("USUARIO_V1")
 SENHA_V1 = os.getenv("SENHA_V1")
 
-# --- CREDENCIAIS E CONEXÃO DO RELÓGIO DA UNIDADE V2 ---
-IP_V2 = os.getenv("IP_V2")
-URL_V2 = f"http://{IP_V2}"
+URL_V2 = _url_do_relogio("IP_V2")
 USUARIO_V2 = os.getenv("USUARIO_V2")
 SENHA_V2 = os.getenv("SENHA_V2")
 
-# --- DIRETÓRIOS E CAMINHOS ---
-DIRETORIO_BASE = os.getenv("DIRETORIO_BASE")
-DIRETORIO_DOWNLOADS = os.path.join(DIRETORIO_BASE, "afd_downloads")
-os.makedirs(DIRETORIO_DOWNLOADS, exist_ok=True)
+HEADLESS_MODE = os.getenv("HEADLESS_MODE", "false").strip().casefold() in {
+    "true",
+    "1",
+    "t",
+    "yes",
+    "on",
+}
 
-# --- CONFIGURAÇÕES DO PLAYWRIGHT ---
-HEADLESS_MODE = os.getenv("HEADLESS_MODE").lower() in ("true", "1", "t")
-SLOW_MO_MS = int(os.getenv("SLOW_MO_MS", "500"))
+try:
+    SLOW_MO_MS = int(os.getenv("SLOW_MO_MS", "500"))
+except ValueError as exc:
+    raise ValueError("SLOW_MO_MS deve ser um inteiro não negativo") from exc
+
+if SLOW_MO_MS < 0:
+    raise ValueError("SLOW_MO_MS deve ser um inteiro não negativo")
+
+
+def validar_configuracao_relogio(versao: str) -> None:
+    """Falha com uma lista clara antes de iniciar o navegador."""
+    configuracoes = {
+        "v1": (URL_V1, USUARIO_V1, SENHA_V1),
+        "v2": (URL_V2, USUARIO_V2, SENHA_V2),
+    }
+    try:
+        valores = configuracoes[versao]
+    except KeyError as exc:
+        raise ValueError(f"Versão de relógio desconhecida: {versao}") from exc
+
+    nomes = (f"IP_{versao.upper()}", f"USUARIO_{versao.upper()}", f"SENHA_{versao.upper()}")
+    faltando = [nome for nome, valor in zip(nomes, valores, strict=True) if not valor]
+    if faltando:
+        raise OSError(f"Configuração do relógio {versao.upper()} ausente: {', '.join(faltando)}")

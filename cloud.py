@@ -1,24 +1,33 @@
+"""Automatiza o envio do arquivo AFD ao painel central via Playwright.
+
+O módulo valida configuração e arquivo antes de abrir o navegador, autentica
+no painel e envia a unidade junto ao arquivo. O site não oferece um seletor de
+confirmação conhecido, então o retorno representa o envio do formulário, não
+uma confirmação persistida pelo servidor.
+"""
+
 import logging
 import os
 import time
 
-from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
+from config import HEADLESS_MODE, SLOW_MO_MS
 from logging_config import capturar_screenshot
 
 logger = logging.getLogger(__name__)
 
-# Carrega as variáveis de ambiente do arquivo .env local
-load_dotenv()
-
-SERVER_URL = os.getenv("SERVER_URL")
+SERVER_URL = os.getenv("SERVER_URL", "").strip()
 SERVER_USER = os.getenv("SERVER_USER")
 SERVER_PASSWORD = os.getenv("SERVER_PASSWORD")
 
 
 def enviar_afd_para_servidor(caminho_arquivo_afd: str, unidade: str = "V1"):
-    """Realiza o upload automatizado do arquivo AFD gerado para o painel central do servidor."""
+    """Autentica no painel e submete o AFD associado à unidade informada.
+
+    Falhas de configuração, navegação ou envio são propagadas ao pipeline
+    chamador; a captura de tela é apenas diagnóstica e não oculta a exceção.
+    """
     inicio = time.perf_counter()
 
     # Validação defensiva prévia (senha nunca é logada)
@@ -33,9 +42,9 @@ def enviar_afd_para_servidor(caminho_arquivo_afd: str, unidade: str = "V1"):
     ]
     if faltando:
         logger.critical("Variáveis de ambiente ausentes no .env: %s", ", ".join(faltando))
-        raise EnvironmentError(f"Variáveis de ambiente ausentes: {', '.join(faltando)}")
+        raise OSError(f"Variáveis de ambiente ausentes: {', '.join(faltando)}")
 
-    if not os.path.exists(caminho_arquivo_afd):
+    if not os.path.isfile(caminho_arquivo_afd):
         logger.error("Arquivo AFD não encontrado: %s", caminho_arquivo_afd)
         raise FileNotFoundError(
             f"O arquivo AFD não foi encontrado no caminho especificado: {caminho_arquivo_afd}"
@@ -46,17 +55,21 @@ def enviar_afd_para_servidor(caminho_arquivo_afd: str, unidade: str = "V1"):
         "Iniciando upload [%s] | arquivo=%s (%d bytes)", unidade, caminho_arquivo_afd, tamanho
     )
     if tamanho == 0:
-        logger.warning("Arquivo AFD [%s] está vazio (0 bytes); o upload pode ser rejeitado", unidade)
+        logger.warning(
+            "Arquivo AFD [%s] está vazio (0 bytes); o upload pode ser rejeitado", unidade
+        )
 
     with sync_playwright() as p:
-        headless = os.getenv("HEADLESS_MODE", "False").lower() == "true"
-        slow_mo = int(os.getenv("SLOW_MO_MS", "500"))
-        logger.debug("Parâmetros do navegador | headless=%s slow_mo=%sms", headless, slow_mo)
-
-        browser = p.chromium.launch(headless=headless, slow_mo=slow_mo)
-        page = browser.new_page()
-
+        browser = None
+        page = None
         try:
+            logger.debug(
+                "Parâmetros do navegador | headless=%s slow_mo=%sms",
+                HEADLESS_MODE,
+                SLOW_MO_MS,
+            )
+            browser = p.chromium.launch(headless=HEADLESS_MODE, slow_mo=SLOW_MO_MS)
+            page = browser.new_page()
             logger.info("Acessando a página de autenticação: %s", SERVER_URL)
             page.goto(SERVER_URL)
 
@@ -85,20 +98,21 @@ def enviar_afd_para_servidor(caminho_arquivo_afd: str, unidade: str = "V1"):
             logger.info("Enviando dados ao servidor")
             page.locator("button:has-text('Enviar')").click()
 
-            # Buffer de processamento no backend.
-            # FIXME: sucesso é presumido; validar toast/mensagem de confirmação do painel
+            # O painel não expõe um seletor de confirmação conhecido neste projeto.
             page.wait_for_timeout(3000)
             logger.info(
-                "Upload da unidade %s concluído (sem confirmação explícita do painel) em %.1fs",
+                "Solicitação de upload da unidade %s enviada; painel sem confirmação explícita (%.1fs)",
                 unidade,
                 time.perf_counter() - inicio,
             )
 
         except Exception:
             logger.exception("Falha durante o envio ao servidor (unidade %s)", unidade)
-            capturar_screenshot(page, f"cloud_falha_{unidade}", logger)
+            if page is not None:
+                capturar_screenshot(page, f"cloud_falha_{unidade}", logger)
             raise
 
         finally:
-            logger.debug("Encerrando instância do navegador")
-            browser.close()
+            if browser is not None:
+                logger.debug("Encerrando instância do navegador")
+                browser.close()

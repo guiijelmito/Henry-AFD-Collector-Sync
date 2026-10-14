@@ -1,14 +1,14 @@
-:: Executa o script Python principal do projeto de automação de ponto eletrônico via agendamento de tarefas Windows.
 @echo off
+setlocal
 
-:: Muda o diretório para o local do projeto
-cd /d "C:\Users\Leticia\Documents\Dev-Verth\Automações\ponto_eletronico_automazido"
+pushd "%~dp0" || exit /b 1
+if not exist "venv\Scripts\python.exe" (
+    echo Ambiente virtual nao encontrado. Crie-o e instale requirements.txt.
+    popd
+    exit /b 1
+)
 
-:: Ativa o ambiente virtual do Python
-call venv\Scripts\activate
-
-python main.py
-
-:: Exibe uma mensagem indicando que a execução foi concluída e fecha o terminal
-echo Execução concluída. Verifique log_execucao.txt para detalhes. 
-exit
+"venv\Scripts\python.exe" main.py
+set "exit_code=%errorlevel%"
+popd
+exit /b %exit_code%

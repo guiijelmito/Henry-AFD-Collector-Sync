@@ -1,20 +1,29 @@
-import json
+"""Extrai arquivos AFD do relógio V2, conectado pela rede externa.
+
+O cursor V2 é independente do cursor da V1. A automação solicita um lote fixo,
+salva o AFD localmente e então avança o cursor; falhas antes dessa gravação
+preservam o próximo intervalo para uma nova tentativa.
+"""
+
 import logging
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 from config import (
-    URL_V2,
-    USUARIO_V2,
-    SENHA_V2,
     DIRETORIO_DOWNLOADS,
     HEADLESS_MODE,
+    SENHA_V2,
     SLOW_MO_MS,
+    URL_V2,
+    USUARIO_V2,
+    validar_configuracao_relogio,
 )
 from logging_config import capturar_screenshot
+from state_store import StateIntegrityError, load_nsr, save_nsr
 
 logger = logging.getLogger(__name__)
 
@@ -26,59 +35,28 @@ NSR_PADRAO_V2 = "00001153"
 
 
 def carregar_estado(versao="v2"):
-    # Carrega o último NSR processado do arquivo JSON com fallback seguro
+    """Lê e normaliza o cursor da V2, parando se o estado estiver corrompido."""
     logger.debug("Carregando estado (%s) de %s", versao, ARQUIVO_ESTADO)
-
-    if not os.path.exists(ARQUIVO_ESTADO):
-        logger.warning(
-            "Arquivo de estado inexistente; usando NSR padrão inicial %s", NSR_PADRAO_V2
-        )
-        return NSR_PADRAO_V2
-
     try:
-        with open(ARQUIVO_ESTADO, "r") as f:
-            dados = json.load(f)
-        # FIXME: chaves 'last_nsr_*' aqui divergem de 'last_nsr_*' usadas no módulo V1
-        chave = "last_nsr_v1" if versao == "v1" else "last_nsr_v2"
-        valor = dados.get(chave)
-        if valor is None:
-            logger.warning("Chave '%s' ausente no estado; o chamador aplicará o padrão", chave)
-        else:
-            logger.debug("Estado carregado | %s=%s", chave, valor)
-        return valor
-    except json.JSONDecodeError:
-        logger.exception(
-            "JSON de estado corrompido; usando NSR padrão %s (possível reprocessamento)",
-            NSR_PADRAO_V2,
-        )
-    return NSR_PADRAO_V2
+        valor = load_nsr(ARQUIVO_ESTADO, versao, NSR_PADRAO_V2)
+    except StateIntegrityError:
+        logger.exception("Estado de coleta inválido; interrompendo para preservar o cursor")
+        raise
+    logger.debug("Estado carregado | last_nsr_%s=%s", versao, valor)
+    return valor
 
 
 def salvar_estado(novo_nsr, versao="v2"):
-    # Atualiza o arquivo de estado preservando as demais chaves
+    """Avança o cursor V2 sem remover estado da V1 ou metadados compartilhados."""
     logger.debug("Salvando estado | versao=%s novo_nsr=%s", versao, novo_nsr)
-    dados = {}
-
-    if os.path.exists(ARQUIVO_ESTADO):
-        try:
-            with open(ARQUIVO_ESTADO, "r") as f:
-                dados = json.load(f)
-        except json.JSONDecodeError:
-            logger.exception(
-                "JSON de estado corrompido ao salvar; recriando estado do zero (outras chaves perdidas)"
-            )
-            dados = {}
-
-    chave = f"last_nsr_{versao}"
-    dados[chave] = novo_nsr
-
-    with open(ARQUIVO_ESTADO, "w") as f:
-        json.dump(dados, f, indent=4)
-
-    logger.info("JSON de estado atualizado (%s): %s", chave, novo_nsr)
+    save_nsr(ARQUIVO_ESTADO, versao, novo_nsr)
+    logger.info("Estado atualizado (last_nsr_%s=%s)", versao, novo_nsr)
 
 
 def automatizar_download_afd_v2():
+    """Baixa o lote AFD V2 e atualiza seu cursor depois de salvar o arquivo."""
+    validar_configuracao_relogio("v2")
+    Path(DIRETORIO_DOWNLOADS).mkdir(parents=True, exist_ok=True)
     inicio = time.perf_counter()
     data_hoje = datetime.now().strftime("%d-%m-%Y")
 
@@ -109,12 +87,12 @@ def automatizar_download_afd_v2():
         browser = p.chromium.launch(
             headless=HEADLESS_MODE,
             slow_mo=SLOW_MO_MS,
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"])
-        
-        page = browser.new_page()
-        logger.debug("Navegador Chromium iniciado")
+        )
+        page = None
 
         try:
+            page = browser.new_page()
+            logger.debug("Navegador Chromium iniciado")
             logger.info("Acessando painel V2: %s", URL_V2)
             page.goto(URL_V2)
             page.wait_for_load_state("networkidle")
@@ -163,18 +141,9 @@ def automatizar_download_afd_v2():
                 salvar_estado(NSR_FINAL, "v2")
 
             except Exception:
-                logger.exception(
-                    "Falha ao capturar o evento de download; acionando fallback (clique forçado)"
-                )
+                logger.exception("Falha ao capturar ou salvar o download; o estado será preservado")
                 capturar_screenshot(page, "v2_download_falha", logger)
-                page.locator('a[onclick="downloadData(1,32,1);"]').click(force=True)
-                time.sleep(5)
-                logger.warning(
-                    "Fallback concluído, mas o arquivo NÃO foi confirmado em disco: %s",
-                    caminho_salvo,
-                )
-                logger.warning("Avançando estado de NSR sem confirmação de download (fallback)")
-                salvar_estado(NSR_FINAL, "v2")
+                raise
 
             time.sleep(3)  # buffer de estabilização
             logger.info(
@@ -184,7 +153,8 @@ def automatizar_download_afd_v2():
 
         except Exception:
             logger.exception("Falha inesperada na automação V2")
-            capturar_screenshot(page, "v2_falha_geral", logger)
+            if page is not None:
+                capturar_screenshot(page, "v2_falha_geral", logger)
             raise
 
         finally:

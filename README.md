@@ -46,32 +46,19 @@ source venv/bin/activate
 ### 3. Install dependencies
 
 ```bash
-pip install playwright python-dotenv
+pip install -r requirements.txt
 playwright install chromium
 ```
 
 ### 4. Configure environment variables
 
-Create a `.env` file in the root directory based on your clock settings:
+Copy `.env.example` to `.env` and set the panel credentials, both clock addresses,
+and the usernames and passwords. The V2 address must be reachable over Tailscale.
+The default download and log directories are created under the project folder.
+Set `DIRETORIO_BASE` or `DIRETORIO_DOWNLOADS` only when you need a different location.
 
 ```env
-SERVER_URL = http://192.168.1.100/painel_ponto/login.php
-SERVER_USER = admin_verth
-SERVER_PASSWORD = your_password_here
-
-IP_V1 = 192.168.X.XXX
-USUARIO_V1 = your_user_here
-SENHA_V1 = your_password_here
-
-IP_V2=192.168.X.XXX
-USUARIO_V2 = your_user_here
-SENHA_V2 = your_password_here
-
-DIRETORIO_BASE = /caminho/para/o/seu/projeto/ponto_eletronico_automazido/
-DIRETORIO_DOWNLOADS = /caminho/para/a/pasta/de/downloads/
-
-HEADLESS_MODE = False
-SLOW_MO_MS = 500
+copy .env.example .env
 ```
 
 ### 5. Initialize state file
@@ -80,9 +67,17 @@ Ensure `estado_ponto.json` exists in the root directory with your initial NSR po
 
 ```json
 {
-  "ultimo_nsr": "000044930"
+  "last_nsr_v1": "000045076",
+  "last_nsr_v2": "000001153",
+  "next_date": "2026-01-01"
 }
 ```
+
+The V1 cursor advances only when `next_date` is more than seven days in the past.
+The V2 cursor advances after its download is saved. A missing state file starts from
+the configured defaults; malformed JSON or a nonnumeric cursor stops collection so
+the automation cannot silently reset to an earlier NSR. The legacy `ultimo_nsr`
+field is still read as the V1 cursor.
 
 ---
 
@@ -94,6 +89,26 @@ Run the main automation script:
 python main.py
 ```
 
+On Windows, `executar.bat` runs this command from the project directory and returns
+the Python process exit code.
+
+## Development checks
+
+Install the pinned development tools and run the unit tests, branch coverage, lint,
+and formatting checks:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest --cov --cov-report=term-missing
+python -m ruff check .
+python -m ruff format --check .
+python -m pip_audit --local
+```
+
+Coverage currently measures the isolated state persistence module; the Playwright
+flows still need browser and panel integration tests before the project can claim
+end-to-end coverage.
+
 ---
 
 ## 🗂️ Project Structure
@@ -103,12 +118,16 @@ python main.py
 ├── .env                   # Sensitive credentials and URLs (git-ignored)
 ├── .gitignore             # Excludes venv, .env, state files, and downloads
 ├── config.py              # Configuration loader and environment variables bindings
+├── state_store.py         # Validated, atomic JSON state persistence for both clocks
 ├── estado_ponto.json      # Dynamic state tracker for the last processed NSR
 ├── extract_afc_v1.py      # Playwright automation script for Unit V1 (Local)
 ├── extract_afc_v2.py      # Playwright automation script for Unit V2 (External via Tailscale)
 ├── cloud.py               # Synchronization and automated web server upload module
 ├── main.py                # Unified central orchestrator for the complete pipeline
 ├── executar.bat           # Windows wrapper script for automated background task scheduling
+├── tests/                 # State integrity and weekly V1 cursor tests
+├── pyproject.toml         # Ruff, pytest, and coverage configuration
+├── requirements-dev.txt   # Pinned quality and security tools
 └── README.md              # Official project documentation
 ```
 

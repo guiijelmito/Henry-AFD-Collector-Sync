@@ -1,20 +1,32 @@
-import json
+"""Extrai arquivos AFD do relógio de ponto V1.
+
+O cursor salvo define o início do próximo lote; cada execução solicita um
+intervalo fixo de NSRs. Após salvar o download local, a V1 só grava o cursor e
+agenda a próxima coleta se ``next_date`` estiver há mais de sete dias. Essa
+regra controla o avanço do estado; a chamada de extração ainda acontece quando
+o pipeline executa este módulo. Em falhas, o estado não é avançado e uma
+captura de tela é tentada para diagnóstico.
+"""
+
 import logging
 import os
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 from config import (
-    URL_V1,
-    USUARIO_V1,
-    SENHA_V1,
     DIRETORIO_DOWNLOADS,
     HEADLESS_MODE,
+    SENHA_V1,
     SLOW_MO_MS,
+    URL_V1,
+    USUARIO_V1,
+    validar_configuracao_relogio,
 )
 from logging_config import capturar_screenshot
+from state_store import StateIntegrityError, load_nsr, load_state_data, save_nsr
 
 logger = logging.getLogger(__name__)
 
@@ -26,75 +38,63 @@ NSR_PADRAO_V1 = "000045076"
 
 
 def carregar_estado(versao="v1"):
-    # Carrega o último NSR processado do arquivo JSON com fallback seguro
+    """Lê e normaliza o cursor da V1, parando se o estado estiver corrompido."""
     logger.debug("Carregando estado (%s) de %s", versao, ARQUIVO_ESTADO)
-
-    if not os.path.exists(ARQUIVO_ESTADO):
-        logger.warning(
-            "Arquivo de estado inexistente; usando NSR padrão inicial %s", NSR_PADRAO_V1
-        )
-        return NSR_PADRAO_V1
-
     try:
-        with open(ARQUIVO_ESTADO, "r") as f:
-            dados = json.load(f)
-        chave = "last_nsr_v1" if versao == "v1" else "last_nsr_v2"
-        valor = dados.get(chave)
-        if valor is None:
-            # FIXME: retornar None quebra o int() do chamador; considerar cair no NSR padrão
-            logger.warning("Chave '%s' ausente no estado; retornando None", chave)
-        else:
-            logger.debug("Estado carregado | %s=%s", chave, valor)
-        return valor
-    except json.JSONDecodeError:
-        # Risco: cair no NSR padrão pode re-baixar um intervalo já processado
-        logger.exception(
-            "JSON de estado corrompido; usando NSR padrão %s (possível reprocessamento)",
-            NSR_PADRAO_V1,
-        )
-    return NSR_PADRAO_V1
+        valor = load_nsr(ARQUIVO_ESTADO, versao, NSR_PADRAO_V1)
+    except StateIntegrityError:
+        logger.exception("Estado de coleta inválido; interrompendo para preservar o cursor")
+        raise
+    logger.debug("Estado carregado | last_nsr_%s=%s", versao, valor)
+    return valor
 
 
 def salvar_estado(novo_nsr, versao="v1"):
-    # Atualiza o arquivo de estado preservando as demais chaves
+    """Avança o cursor V1 e agenda sete dias à frente quando a janela libera.
+
+    Um ``next_date`` ausente, inválido ou com até sete dias de idade impede a
+    atualização, preservando o estado existente.
+    """
     logger.debug("Salvando estado | versao=%s novo_nsr=%s", versao, novo_nsr)
-    dados = {}
-
-    if os.path.exists(ARQUIVO_ESTADO):
-        try:
-            with open(ARQUIVO_ESTADO, "r") as f:
-                dados = json.load(f)
-        except json.JSONDecodeError:
-            logger.exception(
-                "JSON de estado corrompido ao salvar; recriando estado do zero (outras chaves perdidas)"
-            )
-            dados = {}
-
-    chave = f"last_nsr_{versao}"
-    
+    dados = load_state_data(ARQUIVO_ESTADO)
     data_coleta = dados.get("next_date")
     data_hoje = datetime.now()
     logger.debug("Validando janela de coleta | hoje=%s next_date=%s", data_hoje, data_coleta)
 
-    if str(data_hoje).strip() == str(data_coleta).strip():
-        logger.info("Data de coleta confirmada; atualizando estado de %s", chave)
-        dados[chave] = novo_nsr
-
-        proxima_data = data_hoje + timedelta(days=7)
-        dados["next_date"] = proxima_data.strftime("%Y-%m-%d")
-
-        with open(ARQUIVO_ESTADO, "w") as f:
-            json.dump(dados, f, indent=4)
-        logger.info("JSON de estado atualizado (%s): %s", chave, novo_nsr)
+    if data_coleta:
+        try:
+            data_coleta = datetime.strptime(data_coleta, "%Y-%m-%d")
+        except (TypeError, ValueError) as exc:
+            raise StateIntegrityError(
+                "'next_date' deve estar no formato YYYY-MM-DD; o cursor foi preservado"
+            ) from exc
+        diferenca = (data_hoje - data_coleta).days
     else:
+        logger.warning("Chave 'next_date' ausente, negando atualização de estado")
+        return
+
+    if diferenca is None or diferenca <= 7:
         logger.warning(
             "Fora da época de coleta (hoje=%s, next_date=%s); estado NÃO atualizado",
             data_hoje,
             data_coleta,
         )
         return
-    
+
+    proxima_data = data_hoje + timedelta(days=7)
+    save_nsr(
+        ARQUIVO_ESTADO,
+        versao,
+        novo_nsr,
+        extra_values={"next_date": proxima_data.strftime("%Y-%m-%d")},
+    )
+    logger.info("Estado atualizado (last_nsr_%s=%s)", versao, novo_nsr)
+
+
 def automatizar_download_afd_v1():
+    """Baixa o lote AFD V1 e atualiza o estado somente após salvar o arquivo."""
+    validar_configuracao_relogio("v1")
+    Path(DIRETORIO_DOWNLOADS).mkdir(parents=True, exist_ok=True)
     inicio = time.perf_counter()
     data_hoje = datetime.now().strftime("%d-%m-%Y")
 
@@ -126,17 +126,18 @@ def automatizar_download_afd_v1():
         browser = p.chromium.launch(
             headless=HEADLESS_MODE,
             slow_mo=SLOW_MO_MS,
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"])
-        
-        page = browser.new_page()
-        logger.debug("Navegador Chromium iniciado")
+        )
+        page = None
 
         try:
+            page = browser.new_page()
+            logger.debug("Navegador Chromium iniciado")
             logger.info("Acessando painel V1: %s", URL_V1)
             page.goto(URL_V1)
             page.wait_for_load_state("networkidle")
 
-            # Gerenciamento de sessão: tela de login ou sessão já autenticada
+            # O relógio pode manter a sessão entre execuções; se a tela de login
+            # não aparecer, confirme que o menu de download ainda está acessível.
             try:
                 logger.debug("Verificando estado da sessão (timeout=5s)")
                 page.locator("#lblLogin").wait_for(state="visible", timeout=5000)
@@ -155,9 +156,7 @@ def automatizar_download_afd_v1():
                     )
                     logger.info("Sessão V1 já autenticada")
                 except Exception:
-                    logger.exception(
-                        "Sessão expirada ou estado inesperado; recarregando a página"
-                    )
+                    logger.exception("Sessão expirada ou estado inesperado; recarregando a página")
                     page.reload()
                     page.wait_for_load_state("networkidle")
 
@@ -205,19 +204,9 @@ def automatizar_download_afd_v1():
                 salvar_estado(NSR_FINAL)
 
             except Exception:
-                logger.exception(
-                    "Falha ao capturar o evento de download; acionando fallback (clique forçado)"
-                )
+                logger.exception("Falha ao capturar ou salvar o download; o estado será preservado")
                 capturar_screenshot(page, "v1_download_falha", logger)
-                page.locator("a[onclick*='subCompD(5, 8, 1);']").click(force=True)
-                time.sleep(5)
-                logger.warning(
-                    "Fallback concluído, mas o arquivo NÃO foi confirmado em disco: %s",
-                    caminho_salvo,
-                )
-                # Atenção: o estado é avançado mesmo sem confirmação do arquivo
-                logger.warning("Avançando estado de NSR sem confirmação de download (fallback)")
-                salvar_estado(NSR_FINAL)
+                raise
 
             time.sleep(3)  # buffer de estabilização
             logger.info(
@@ -227,7 +216,8 @@ def automatizar_download_afd_v1():
 
         except Exception:
             logger.exception("Falha inesperada na automação V1")
-            capturar_screenshot(page, "v1_falha_geral", logger)
+            if page is not None:
+                capturar_screenshot(page, "v1_falha_geral", logger)
             raise
 
         finally:

@@ -1,20 +1,32 @@
+"""Orquestra extração e upload para os relógios V1 e V2.
+
+Cada unidade é processada mesmo que a anterior falhe. O resultado agregado
+permite que a execução de linha de comando termine com código diferente de
+zero se houver falha ou ausência de arquivo em qualquer relógio.
+"""
+
 import logging
 import os
+import sys
 import time
 
 from logging_config import setup_logging
 
 setup_logging()  # antes dos demais módulos do projeto emitirem logs
 
+from cloud import enviar_afd_para_servidor  # noqa: E402
 from extract_afc_v1 import automatizar_download_afd_v1  # noqa: E402
 from extract_afc_v2 import automatizar_download_afd_v2  # noqa: E402
-from cloud import enviar_afd_para_servidor  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
 def _processar_unidade(unidade, etapa, funcao_extracao, dica_falha=""):
-    """Executa extração + upload de uma unidade e retorna o status ('OK', 'SEM_ARQUIVO' ou 'FALHA')."""
+    """Executa extração e upload, convertendo o resultado em um status do pipeline.
+
+    A exceção da unidade é registrada e convertida em ``FALHA`` para permitir
+    que a outra unidade também seja processada.
+    """
     logger.info("[%s] Processando unidade %s", etapa, unidade)
     inicio = time.perf_counter()
     try:
@@ -41,7 +53,8 @@ def _processar_unidade(unidade, etapa, funcao_extracao, dica_falha=""):
         return "FALHA"
 
 
-def pipeline_principal():
+def pipeline_principal() -> dict[str, str]:
+    """Processa V1 e V2 em sequência e retorna um status por unidade."""
     logger.info("=== Iniciando pipeline completo de ponto eletrônico (V1 & V2) ===")
     inicio = time.perf_counter()
 
@@ -61,7 +74,10 @@ def pipeline_principal():
         logger.info("=== Pipeline finalizado em %.1fs | %s ===", duracao, resumo)
     else:
         logger.warning("=== Pipeline finalizado COM PENDÊNCIAS em %.1fs | %s ===", duracao, resumo)
+    return resultados
 
 
 if __name__ == "__main__":
-    pipeline_principal()
+    resultados = pipeline_principal()
+    if any(status != "OK" for status in resultados.values()):
+        sys.exit(1)
