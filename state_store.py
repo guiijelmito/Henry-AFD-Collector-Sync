@@ -13,6 +13,8 @@ import json
 import os
 import tempfile
 from collections.abc import Mapping
+from datetime import datetime, timedelta
+from datetime import time as datetime_time
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +87,92 @@ def save_nsr(
     if extra_values:
         data.update(extra_values)
     write_state_data(path, data)
+
+
+def is_nsr_advance_due(
+    path: str | Path,
+    version: str,
+    now: datetime | None = None,
+) -> bool:
+    """Informa se o cursor da unidade já pode avançar pela janela semanal.
+
+    A data legada ``next_date`` é aceita como vencimento da V1. Sem uma data
+    configurada, o avanço ainda não está liberado; a primeira gravação bem-
+    sucedida apenas inicia a janela. Datas ISO sem horário são interpretadas
+    como início do dia no fuso local; novos valores contêm horário e offset UTC.
+    """
+    if version not in {"v1", "v2"}:
+        raise ValueError(f"Versão de relógio desconhecida: {version}")
+
+    current_time = now or datetime.now().astimezone()
+    if current_time.tzinfo is None:
+        current_time = current_time.astimezone()
+
+    data = load_state_data(path)
+    value = data.get(f"next_advance_at_{version}")
+    if value is None and version == "v1":
+        value = data.get("next_date")
+    if value is None:
+        return False
+    if not isinstance(value, str):
+        raise StateIntegrityError("O horário de avanço deve ser texto ISO-8601")
+
+    try:
+        if len(value) == 10:
+            due_date = datetime.strptime(value, "%Y-%m-%d").date()
+            due_at = datetime.combine(due_date, datetime_time.min, tzinfo=current_time.tzinfo)
+        else:
+            due_at = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise StateIntegrityError(
+            f"Data de avanço inválida para o relógio {version.upper()}: {value!r}"
+        ) from exc
+
+    if due_at.tzinfo is None:
+        due_at = due_at.replace(tzinfo=current_time.tzinfo)
+    else:
+        due_at = due_at.astimezone(current_time.tzinfo)
+    return current_time >= due_at
+
+
+def advance_nsr_after_upload(
+    path: str | Path,
+    version: str,
+    value: Any,
+    now: datetime | None = None,
+) -> bool:
+    """Avança o cursor e agenda sete dias após um upload sem erro.
+
+    Retorna ``False`` quando a janela ainda está fechada. Cursor e próxima
+    janela são persistidos juntos; a chave legada da V1 é removida na migração.
+    """
+    if version not in {"v1", "v2"}:
+        raise ValueError(f"Versão de relógio desconhecida: {version}")
+
+    current_time = now or datetime.now().astimezone()
+    if current_time.tzinfo is None:
+        current_time = current_time.astimezone()
+
+    data = load_state_data(path)
+    schedule_key = f"next_advance_at_{version}"
+    schedule_value = data.get(schedule_key)
+    if schedule_value is None and version == "v1":
+        schedule_value = data.get("next_date")
+
+    if schedule_value is None:
+        data[schedule_key] = (current_time + timedelta(days=7)).isoformat(timespec="seconds")
+        write_state_data(path, data)
+        return False
+
+    if not is_nsr_advance_due(path, version, current_time):
+        return False
+
+    data[f"last_nsr_{version}"] = normalize_nsr(value)
+    data[schedule_key] = (current_time + timedelta(days=7)).isoformat(timespec="seconds")
+    if version == "v1":
+        data.pop("next_date", None)
+    write_state_data(path, data)
+    return True
 
 
 def write_state_data(path: str | Path, data: Mapping[str, Any]) -> None:

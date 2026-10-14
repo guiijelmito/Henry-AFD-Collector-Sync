@@ -16,12 +16,20 @@ setup_logging()  # antes dos demais módulos do projeto emitirem logs
 
 from cloud import enviar_afd_para_servidor  # noqa: E402
 from extract_afc_v1 import automatizar_download_afd_v1  # noqa: E402
+from extract_afc_v1 import registrar_upload_enviado as registrar_upload_v1  # noqa: E402
 from extract_afc_v2 import automatizar_download_afd_v2  # noqa: E402
+from extract_afc_v2 import registrar_upload_enviado as registrar_upload_v2  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
-def _processar_unidade(unidade, etapa, funcao_extracao, dica_falha=""):
+def _processar_unidade(
+    unidade,
+    etapa,
+    funcao_extracao,
+    registrar_upload,
+    dica_falha="",
+):
     """Executa extração e upload, convertendo o resultado em um status do pipeline.
 
     A exceção da unidade é registrada e convertida em ``FALHA`` para permitir
@@ -34,6 +42,7 @@ def _processar_unidade(unidade, etapa, funcao_extracao, dica_falha=""):
 
         if caminho_afd and os.path.exists(caminho_afd):
             enviar_afd_para_servidor(caminho_afd, unidade=unidade)
+            registrar_upload()
             logger.info(
                 "Unidade %s processada e enviada com sucesso em %.1fs",
                 unidade,
@@ -59,11 +68,12 @@ def pipeline_principal() -> dict[str, str]:
     inicio = time.perf_counter()
 
     resultados = {
-        "V1": _processar_unidade("V1", "1/2", automatizar_download_afd_v1),
+        "V1": _processar_unidade("V1", "1/2", automatizar_download_afd_v1, registrar_upload_v1),
         "V2": _processar_unidade(
             "V2",
             "2/2",
             automatizar_download_afd_v2,
+            registrar_upload_v2,
             dica_falha="Galpão externo via Tailscale: verifique conexão/IP.",
         ),
     }

@@ -1,8 +1,8 @@
 """Extrai arquivos AFD do relógio V2, conectado pela rede externa.
 
-O cursor V2 é independente do cursor da V1. A automação solicita um lote fixo,
-salva o AFD localmente e então avança o cursor; falhas antes dessa gravação
-preservam o próximo intervalo para uma nova tentativa.
+O cursor e a janela semanal da V2 são independentes dos da V1. Cada execução
+baixa e envia novamente o bloco atual; o cursor só avança após o envio quando
+a janela venceu. Falhas mantêm o cursor para permitir nova tentativa.
 """
 
 import logging
@@ -23,7 +23,7 @@ from config import (
     validar_configuracao_relogio,
 )
 from logging_config import capturar_screenshot
-from state_store import StateIntegrityError, load_nsr, save_nsr
+from state_store import StateIntegrityError, advance_nsr_after_upload, load_nsr
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +47,32 @@ def carregar_estado(versao="v2"):
 
 
 def salvar_estado(novo_nsr, versao="v2"):
-    """Avança o cursor V2 sem remover estado da V1 ou metadados compartilhados."""
+    """Após o envio, avança o cursor V2 se a janela semanal venceu.
+
+    Se o estado ainda não tem uma janela, inicia a contagem de sete dias.
+    """
     logger.debug("Salvando estado | versao=%s novo_nsr=%s", versao, novo_nsr)
-    save_nsr(ARQUIVO_ESTADO, versao, novo_nsr)
+    if not advance_nsr_after_upload(
+        ARQUIVO_ESTADO,
+        versao,
+        novo_nsr,
+        now=datetime.now().astimezone(),
+    ):
+        logger.warning(
+            "Janela semanal ainda aberta; cursor %s permanece inalterado", versao.upper()
+        )
+        return
     logger.info("Estado atualizado (last_nsr_%s=%s)", versao, novo_nsr)
 
 
+def registrar_upload_enviado():
+    """Confirma no estado o lote enviado quando a janela permite avançar."""
+    nsr_atual = int(carregar_estado("v2"))
+    salvar_estado(f"{nsr_atual + LOTE_SEMANAL:09d}", "v2")
+
+
 def automatizar_download_afd_v2():
-    """Baixa o lote AFD V2 e atualiza seu cursor depois de salvar o arquivo."""
+    """Baixa o bloco AFD V2 atual; o pipeline o envia antes de atualizar o cursor."""
     validar_configuracao_relogio("v2")
     Path(DIRETORIO_DOWNLOADS).mkdir(parents=True, exist_ok=True)
     inicio = time.perf_counter()
@@ -138,8 +156,6 @@ def automatizar_download_afd_v2():
                 logger.debug("Download recebido | sugerido=%s", download.suggested_filename)
                 download.save_as(caminho_salvo)
                 logger.info("Arquivo AFD baixado e salvo em: %s", caminho_salvo)
-                salvar_estado(NSR_FINAL, "v2")
-
             except Exception:
                 logger.exception("Falha ao capturar ou salvar o download; o estado será preservado")
                 capturar_screenshot(page, "v2_download_falha", logger)

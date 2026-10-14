@@ -1,17 +1,16 @@
 """Extrai arquivos AFD do relógio de ponto V1.
 
-O cursor salvo define o início do próximo lote; cada execução solicita um
-intervalo fixo de NSRs. Após salvar o download local, a V1 só grava o cursor e
-agenda a próxima coleta se ``next_date`` estiver há mais de sete dias. Essa
-regra controla o avanço do estado; a chamada de extração ainda acontece quando
-o pipeline executa este módulo. Em falhas, o estado não é avançado e uma
-captura de tela é tentada para diagnóstico.
+O cursor salvo define o início de um bloco fixo de NSRs. Cada execução baixa e
+envia novamente esse bloco; como o painel substitui registros pelo NSR, isso
+sincroniza os dados sem duplicá-los. O cursor só avança após o envio e quando
+a janela semanal individual da V1 venceu. Falhas mantêm o cursor para que o
+mesmo bloco possa ser tentado novamente.
 """
 
 import logging
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -26,7 +25,11 @@ from config import (
     validar_configuracao_relogio,
 )
 from logging_config import capturar_screenshot
-from state_store import StateIntegrityError, load_nsr, load_state_data, save_nsr
+from state_store import (
+    StateIntegrityError,
+    advance_nsr_after_upload,
+    load_nsr,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,49 +53,35 @@ def carregar_estado(versao="v1"):
 
 
 def salvar_estado(novo_nsr, versao="v1"):
-    """Avança o cursor V1 e agenda sete dias à frente quando a janela libera.
+    """Após o envio do arquivo, avança o cursor se a janela semanal venceu.
 
-    Um ``next_date`` ausente, inválido ou com até sete dias de idade impede a
-    atualização, preservando o estado existente.
+    A data é verificada como próximo horário permitido. Execuções atrasadas
+    continuam elegíveis; execuções dentro da janela deixam o cursor intacto.
+    Se o estado ainda não tem uma janela, inicia a contagem de sete dias.
     """
     logger.debug("Salvando estado | versao=%s novo_nsr=%s", versao, novo_nsr)
-    dados = load_state_data(ARQUIVO_ESTADO)
-    data_coleta = dados.get("next_date")
-    data_hoje = datetime.now()
-    logger.debug("Validando janela de coleta | hoje=%s next_date=%s", data_hoje, data_coleta)
-
-    if data_coleta:
-        try:
-            data_coleta = datetime.strptime(data_coleta, "%Y-%m-%d")
-        except (TypeError, ValueError) as exc:
-            raise StateIntegrityError(
-                "'next_date' deve estar no formato YYYY-MM-DD; o cursor foi preservado"
-            ) from exc
-        diferenca = (data_hoje - data_coleta).days
-    else:
-        logger.warning("Chave 'next_date' ausente, negando atualização de estado")
-        return
-
-    if diferenca is None or diferenca <= 7:
-        logger.warning(
-            "Fora da época de coleta (hoje=%s, next_date=%s); estado NÃO atualizado",
-            data_hoje,
-            data_coleta,
-        )
-        return
-
-    proxima_data = data_hoje + timedelta(days=7)
-    save_nsr(
+    if not advance_nsr_after_upload(
         ARQUIVO_ESTADO,
         versao,
         novo_nsr,
-        extra_values={"next_date": proxima_data.strftime("%Y-%m-%d")},
-    )
+        now=datetime.now().astimezone(),
+    ):
+        logger.warning(
+            "Janela semanal ainda aberta; cursor %s permanece inalterado",
+            versao.upper(),
+        )
+        return
     logger.info("Estado atualizado (last_nsr_%s=%s)", versao, novo_nsr)
 
 
+def registrar_upload_enviado():
+    """Confirma no estado o lote enviado quando a janela permite avançar."""
+    nsr_atual = int(carregar_estado("v1"))
+    salvar_estado(f"{nsr_atual + LOTE_SEMANAL:09d}", "v1")
+
+
 def automatizar_download_afd_v1():
-    """Baixa o lote AFD V1 e atualiza o estado somente após salvar o arquivo."""
+    """Baixa o bloco AFD V1 atual; o pipeline o envia antes de atualizar o cursor."""
     validar_configuracao_relogio("v1")
     Path(DIRETORIO_DOWNLOADS).mkdir(parents=True, exist_ok=True)
     inicio = time.perf_counter()
@@ -201,8 +190,6 @@ def automatizar_download_afd_v1():
                 logger.debug("Download recebido | sugerido=%s", download.suggested_filename)
                 download.save_as(caminho_salvo)
                 logger.info("Arquivo AFD baixado e salvo em: %s", caminho_salvo)
-                salvar_estado(NSR_FINAL)
-
             except Exception:
                 logger.exception("Falha ao capturar ou salvar o download; o estado será preservado")
                 capturar_screenshot(page, "v1_download_falha", logger)

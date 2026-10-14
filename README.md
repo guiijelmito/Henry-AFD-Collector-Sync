@@ -69,15 +69,23 @@ Ensure `estado_ponto.json` exists in the root directory with your initial NSR po
 {
   "last_nsr_v1": "000045076",
   "last_nsr_v2": "000001153",
-  "next_date": "2026-01-01"
+  "next_advance_at_v1": null,
+  "next_advance_at_v2": null
 }
 ```
 
-The V1 cursor advances only when `next_date` is more than seven days in the past.
-The V2 cursor advances after its download is saved. A missing state file starts from
-the configured defaults; malformed JSON or a nonnumeric cursor stops collection so
-the automation cannot silently reset to an earlier NSR. The legacy `ultimo_nsr`
-field is still read as the V1 cursor.
+Each clock has an independent weekly cursor window. Every run downloads and uploads
+the current 146-NSR block; the panel replaces records with matching NSRs, allowing
+the same block to be synchronized repeatedly. After the upload automation returns
+without error and the window is due, the cursor advances by 146 and the next window
+is scheduled seven days from that successful run. A late run remains eligible.
+When a clock has no window timestamp, its first successful upload starts the
+seven-day interval without advancing the cursor. The legacy `next_date` field is
+still read as the V1 due date and removed when the V1 window is next advanced.
+
+A missing state file starts from the configured defaults; malformed JSON or a
+nonnumeric cursor stops collection so the automation cannot silently reset to an
+earlier NSR. The legacy `ultimo_nsr` field is still read as the V1 cursor.
 
 ---
 
