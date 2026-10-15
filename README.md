@@ -114,8 +114,18 @@ pip install -r requirements-dev.txt
 python -m pytest --cov --cov-report=term-missing
 python -m ruff check .
 python -m ruff format --check .
-python -m pip_audit --local
+python -m pip_audit --local --strict
 ```
+
+Pytest writes temporary files to `.tmp/pytest-basetemp`, avoiding Windows system
+temporary folders with restricted permissions. The folder is disposable and is
+cleared by pytest between runs. Ruff keeps its cache under `.tmp/ruff_cache`.
+
+The dependency audit inspects the active virtual environment, including installed
+transitive dependencies. Activate the environment populated with
+`requirements-dev.txt` before running it. `pip-audit` needs network access to query
+the vulnerability service; `--strict` makes dependency collection failures fail
+the command instead of silently producing an incomplete report.
 
 Coverage currently measures the isolated state persistence module; the Playwright
 flows still need browser and panel integration tests before the project can claim

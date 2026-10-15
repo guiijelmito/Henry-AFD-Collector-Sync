@@ -1,6 +1,8 @@
 """Verifica a janela de execução e a ordem de upload no pipeline."""
 
 import main
+from extract_afc_v2 import TailnetConnectionError
+from state_store import NsrWindowConfigurationError
 
 
 def test_cursor_registration_happens_after_upload_returns(tmp_path, monkeypatch):
@@ -62,3 +64,24 @@ def test_closed_window_skips_extraction_upload_and_cursor_registration(monkeypat
     )
 
     assert status == "FORA_DA_JANELA"
+
+
+def test_missing_window_configuration_has_specific_status_and_message(caplog):
+    def missing_window():
+        raise NsrWindowConfigurationError("Janela semanal do relógio V2 ausente")
+
+    status = main._processar_unidade("V2", "2/2", missing_window, lambda: None, lambda: None)
+
+    assert status == "JANELA_NAO_CONFIGURADA"
+    assert "bloqueada pela janela semanal" in caplog.text
+    assert "Tailscale" not in caplog.text
+
+
+def test_tailnet_connection_failure_has_specific_status_and_message(caplog):
+    def connection_failure():
+        raise TailnetConnectionError("Não foi possível alcançar o painel V2")
+
+    status = main._processar_unidade("V2", "2/2", lambda: True, connection_failure, lambda: None)
+
+    assert status == "FALHA_TAILSCALE"
+    assert "Falha de conexão Tailscale" in caplog.text

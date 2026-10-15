@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 from config import (
@@ -32,6 +33,11 @@ from state_store import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class TailnetConnectionError(ConnectionError):
+    """Indica que o painel V2 não pôde ser alcançado pela rede Tailscale."""
+
 
 # Caminhos base para persistência local do estado de controle de NSRs da V2
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -124,7 +130,13 @@ def automatizar_download_afd_v2():
             page = browser.new_page()
             logger.debug("Navegador Chromium iniciado")
             logger.info("Acessando painel V2: %s", URL_V2)
-            page.goto(URL_V2)
+            try:
+                page.goto(URL_V2)
+            except PlaywrightError as exc:
+                raise TailnetConnectionError(
+                    "Não foi possível alcançar o painel V2. Verifique se o dispositivo está "
+                    "conectado ao Tailscale, se o IP_V2 está correto e se o relógio está acessível."
+                ) from exc
             page.wait_for_load_state("networkidle")
 
             if page.locator("#lblLogin").is_visible():
@@ -178,6 +190,11 @@ def automatizar_download_afd_v2():
                 "Automação V2 finalizada com sucesso em %.1fs", time.perf_counter() - inicio
             )
             return caminho_salvo
+
+        except TailnetConnectionError:
+            if page is not None:
+                capturar_screenshot(page, "v2_conexao_tailscale_falha", logger)
+            raise
 
         except Exception:
             logger.exception("Falha inesperada na automação V2")

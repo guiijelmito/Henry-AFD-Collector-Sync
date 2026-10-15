@@ -23,6 +23,10 @@ class StateIntegrityError(ValueError):
     """Indica que o arquivo de estado existe, mas não pode ser confiado."""
 
 
+class NsrWindowConfigurationError(StateIntegrityError):
+    """Indica que há cursor salvo, mas falta a data que libera o próximo ciclo."""
+
+
 def load_state_data(path: str | Path) -> dict[str, Any]:
     """Lê o JSON de estado; só um arquivo ausente é tratado como estado vazio."""
     state_path = Path(path)
@@ -118,7 +122,7 @@ def is_nsr_advance_due(
             cursor = data.get("ultimo_nsr")
         if cursor is None:
             return True
-        raise StateIntegrityError(
+        raise NsrWindowConfigurationError(
             f"Janela semanal do relógio {version.upper()} ausente; upload bloqueado "
             "até configurar o próximo horário permitido"
         )

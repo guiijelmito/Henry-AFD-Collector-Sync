@@ -18,9 +18,10 @@ from cloud import enviar_afd_para_servidor  # noqa: E402
 from extract_afc_v1 import automatizar_download_afd_v1  # noqa: E402
 from extract_afc_v1 import janela_semanal_vencida as janela_v1_vencida  # noqa: E402
 from extract_afc_v1 import registrar_upload_enviado as registrar_upload_v1  # noqa: E402
-from extract_afc_v2 import automatizar_download_afd_v2  # noqa: E402
+from extract_afc_v2 import TailnetConnectionError, automatizar_download_afd_v2  # noqa: E402
 from extract_afc_v2 import janela_semanal_vencida as janela_v2_vencida  # noqa: E402
 from extract_afc_v2 import registrar_upload_enviado as registrar_upload_v2  # noqa: E402
+from state_store import NsrWindowConfigurationError  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,6 @@ def _processar_unidade(
     janela_vencida,
     funcao_extracao,
     registrar_upload,
-    dica_falha="",
 ):
     """Executa extração e upload, convertendo o resultado em um status do pipeline.
 
@@ -67,8 +67,16 @@ def _processar_unidade(
         )
         return "SEM_ARQUIVO"
 
+    except NsrWindowConfigurationError as exc:
+        logger.error("Execução da unidade %s bloqueada pela janela semanal: %s", unidade, exc)
+        return "JANELA_NAO_CONFIGURADA"
+
+    except TailnetConnectionError as exc:
+        logger.error("Falha de conexão Tailscale com a unidade %s: %s", unidade, exc)
+        return "FALHA_TAILSCALE"
+
     except Exception:
-        logger.exception("Falha crítica no pipeline da unidade %s. %s", unidade, dica_falha)
+        logger.exception("Falha crítica no pipeline da unidade %s", unidade)
         return "FALHA"
 
 
@@ -91,7 +99,6 @@ def pipeline_principal() -> dict[str, str]:
             janela_v2_vencida,
             automatizar_download_afd_v2,
             registrar_upload_v2,
-            dica_falha="Galpão externo via Tailscale: verifique conexão/IP.",
         ),
     }
 

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from state_store import (
+    NsrWindowConfigurationError,
     StateIntegrityError,
     advance_nsr_after_upload,
     is_nsr_advance_due,
@@ -103,9 +104,9 @@ def test_existing_cursor_without_window_is_blocked_for_safety(tmp_path):
     state_path.write_text('{"last_nsr_v1": "100"}', encoding="utf-8")
     now = datetime(2026, 10, 13, 15, tzinfo=timezone(timedelta(hours=-3)))
 
-    with pytest.raises(StateIntegrityError, match="upload bloqueado"):
+    with pytest.raises(NsrWindowConfigurationError, match="upload bloqueado"):
         is_nsr_advance_due(state_path, "v1", now)
-    with pytest.raises(StateIntegrityError, match="upload bloqueado"):
+    with pytest.raises(NsrWindowConfigurationError, match="upload bloqueado"):
         advance_nsr_after_upload(state_path, "v1", "246", now)
 
     data = json.loads(state_path.read_text(encoding="utf-8"))
