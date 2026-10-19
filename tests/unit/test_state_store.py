@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from ponto_eletronico.state_store import (
-    AuditScheduleConfigurationError,
     StateIntegrityError,
     audit_date_range,
     is_audit_due,
@@ -18,8 +17,8 @@ FRIDAY = datetime(2026, 10, 23, 15, tzinfo=TZ)
 
 def test_audit_date_range_is_monday_to_current_friday():
     assert audit_date_range(FRIDAY) == (
-        "19/10/2026 00:00:00",
-        "23/10/2026 15:00:00",
+        "19/10/2026 00:00",
+        "23/10/2026 15:00",
     )
 
 
@@ -52,21 +51,11 @@ def test_first_audit_is_allowed_on_friday_without_state(tmp_path):
     assert is_audit_due(tmp_path / "missing.json", "v1", FRIDAY)
 
 
-def test_legacy_cursor_without_schedule_blocks_audit(tmp_path):
-    state_path = tmp_path / "state.json"
-    state_path.write_text('{"last_nsr_v1": "45660"}', encoding="utf-8")
-
-    with pytest.raises(AuditScheduleConfigurationError):
-        is_audit_due(state_path, "v1", FRIDAY)
-
-
-def test_successful_upload_migrates_schedule_and_removes_saved_nsr_cursors(tmp_path):
+def test_successful_upload_migrates_legacy_schedule_fields(tmp_path):
     state_path = tmp_path / "state.json"
     state_path.write_text(
         json.dumps(
             {
-                "last_nsr_v1": "45660",
-                "last_nsr_v2": "1329",
                 "next_advance_at_v1": "2026-10-23T09:00:00-03:00",
                 "next_advance_at_v2": "2026-10-23T09:00:00-03:00",
             }

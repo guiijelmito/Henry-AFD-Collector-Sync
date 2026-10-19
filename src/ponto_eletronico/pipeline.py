@@ -21,7 +21,6 @@ from .extractors.henry_v1 import registrar_upload_enviado as registrar_upload_v1
 from .extractors.henry_v2 import TailnetConnectionError, automatizar_download_afd_v2  # noqa: E402
 from .extractors.henry_v2 import janela_semanal_vencida as janela_v2_vencida  # noqa: E402
 from .extractors.henry_v2 import registrar_upload_enviado as registrar_upload_v2  # noqa: E402
-from .state_store import AuditScheduleConfigurationError  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +65,6 @@ def _processar_unidade(
             caminho_afd,
         )
         return "SEM_ARQUIVO"
-
-    except AuditScheduleConfigurationError as exc:
-        logger.error("Execução da unidade %s bloqueada pela janela semanal: %s", unidade, exc)
-        return "JANELA_NAO_CONFIGURADA"
-
     except TailnetConnectionError as exc:
         logger.error("Falha de conexão Tailscale com a unidade %s: %s", unidade, exc)
         return "FALHA_TAILSCALE"

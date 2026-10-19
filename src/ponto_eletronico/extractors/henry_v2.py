@@ -3,12 +3,13 @@
 import logging
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
+from ..afd_validation import preencher_intervalo_data_hora, validar_afd_v2_no_intervalo
 from ..config import (
     DIRETORIO_DOWNLOADS,
     HEADLESS_MODE,
@@ -45,16 +46,18 @@ def registrar_upload_enviado():
 
 
 def automatizar_download_afd_v2():
-    """Baixa os registros V2 de segunda-feira até agora na sexta de auditoria."""
+    """Baixa de segunda até o horário atual na janela semanal permitida."""
     validar_configuracao_relogio("v2")
     Path(DIRETORIO_DOWNLOADS).mkdir(parents=True, exist_ok=True)
     inicio = time.perf_counter()
     agora = datetime.now().astimezone()
     data_inicial, data_final = audit_date_range(agora)
-    segunda_data = (agora - timedelta(days=agora.weekday())).strftime("%Y-%m-%d")
-    data_hoje = agora.strftime("%Y-%m-%d")
+    modo_headless = HEADLESS_MODE
+    atraso_ms = SLOW_MO_MS
+    data_inicial_arquivo = datetime.strptime(data_inicial, "%d/%m/%Y %H:%M").strftime("%Y-%m-%d")
+    data_final_arquivo = datetime.strptime(data_final, "%d/%m/%Y %H:%M").strftime("%Y-%m-%d")
 
-    nome_arquivo = f"AFD_V2_{segunda_data}_a_{data_hoje}.txt"
+    nome_arquivo = f"AFD_V2_{data_inicial_arquivo}_a_{data_final_arquivo}.txt"
     caminho_salvo = os.path.join(DIRETORIO_DOWNLOADS, nome_arquivo)
 
     logger.info(
@@ -64,15 +67,15 @@ def automatizar_download_afd_v2():
     )
     logger.debug(
         "Parâmetros | headless=%s slow_mo=%sms destino=%s",
-        HEADLESS_MODE,
-        SLOW_MO_MS,
+        modo_headless,
+        atraso_ms,
         caminho_salvo,
     )
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=HEADLESS_MODE,
-            slow_mo=SLOW_MO_MS,
+            headless=modo_headless,
+            slow_mo=atraso_ms,
         )
         page = None
 
@@ -113,8 +116,11 @@ def automatizar_download_afd_v2():
 
             logger.info("Inserindo período de data/hora: %s -> %s", data_inicial, data_final)
             page.locator("#lblDataI").wait_for(state="visible", timeout=10000)
-            page.locator("#lblDataI").fill(data_inicial)
-            page.locator("#lblDataF").fill(data_final)
+            preencher_intervalo_data_hora(
+                page,
+                data_inicial,
+                data_final,
+            )
             page.wait_for_load_state("networkidle")
 
             try:
@@ -129,13 +135,22 @@ def automatizar_download_afd_v2():
                 download = download_info.value
                 logger.debug("Download recebido | sugerido=%s", download.suggested_filename)
                 download.save_as(caminho_salvo)
+                menor, maior, quantidade = validar_afd_v2_no_intervalo(
+                    caminho_salvo,
+                    (data_inicial, data_final),
+                )
+                logger.info(
+                    "Filtro AFD validado | %s marcações entre %s e %s",
+                    quantidade,
+                    menor.strftime("%d/%m/%Y %H:%M"),
+                    maior.strftime("%d/%m/%Y %H:%M"),
+                )
                 logger.info("Arquivo AFD baixado e salvo em: %s", caminho_salvo)
             except Exception:
                 logger.exception("Falha ao capturar ou salvar o download; o estado será preservado")
                 capturar_screenshot(page, "v2_download_falha", logger)
                 raise
 
-            time.sleep(3)  # buffer de estabilização
             logger.info(
                 "Automação V2 finalizada com sucesso em %.1fs", time.perf_counter() - inicio
             )

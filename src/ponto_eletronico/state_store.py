@@ -21,10 +21,6 @@ class StateIntegrityError(ValueError):
     """O arquivo de estado existe, mas não pode ser interpretado com segurança."""
 
 
-class AuditScheduleConfigurationError(StateIntegrityError):
-    """A unidade tem estado prévio, mas não tem data de auditoria configurada."""
-
-
 def load_state_data(path: str | Path) -> dict[str, Any]:
     """Lê o JSON de estado; somente a ausência do arquivo significa estado vazio."""
     state_path = Path(path)
@@ -47,14 +43,16 @@ def _current_time(now: datetime | None) -> datetime:
 
 
 def audit_date_range(now: datetime | None = None) -> tuple[str, str]:
-    """Retorna segunda-feira 00:00 até o momento atual, aceitando somente sexta."""
+    """Retorna segunda-feira 00:00 até o momento atual, somente na sexta."""
     current_time = _current_time(now)
     if current_time.weekday() != 4:
         raise ValueError("A coleta e auditoria semanal só podem ocorrer na sexta-feira")
-    monday = (current_time - timedelta(days=4)).replace(hour=0, minute=0, second=0, microsecond=0)
+    monday = (current_time - timedelta(days=current_time.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     return (
-        monday.strftime("%d/%m/%Y %H:%M:%S"),
-        current_time.strftime("%d/%m/%Y %H:%M:%S"),
+        monday.strftime("%d/%m/%Y %H:%M"),
+        current_time.strftime("%d/%m/%Y %H:%M"),
     )
 
 
@@ -85,11 +83,6 @@ def is_audit_due(
     data = load_state_data(path)
     value = _schedule_value(data, version)
     if value is None:
-        legacy_has_state = any(key in data for key in ("last_nsr_v1", "last_nsr_v2", "ultimo_nsr"))
-        if legacy_has_state:
-            raise AuditScheduleConfigurationError(
-                f"Data de auditoria da unidade {version.upper()} ausente"
-            )
         return True
 
     try:
@@ -131,8 +124,6 @@ def record_audit_upload(
     data.pop(f"next_advance_at_{version}", None)
     if version == "v1":
         data.pop("next_date", None)
-    for key in ("last_nsr_v1", "last_nsr_v2", "ultimo_nsr"):
-        data.pop(key, None)
     write_state_data(path, data)
     return True
 
