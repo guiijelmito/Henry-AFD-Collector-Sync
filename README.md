@@ -55,23 +55,15 @@ playwright install chromium
 Create a `.env` file in the root directory based on your clock settings:
 
 ```env
-SERVER_URL = http://192.168.1.100/painel_ponto/login.php
-SERVER_USER = admin_verth
-SERVER_PASSWORD = your_password_here
-
-IP_V1 = 192.168.X.XXX
-USUARIO_V1 = your_user_here
-SENHA_V1 = your_password_here
-
-IP_V2=192.168.X.XXX
-USUARIO_V2 = your_user_here
-SENHA_V2 = your_password_here
-
-DIRETORIO_BASE = /caminho/para/o/seu/projeto/ponto_eletronico_automazido/
-DIRETORIO_DOWNLOADS = /caminho/para/a/pasta/de/downloads/
-
-HEADLESS_MODE = False
-SLOW_MO_MS = 500
+SERVER_URL=https://example.invalid
+SERVER_USER=your_server_user
+SERVER_PASSWORD=replace_me
+IP_V1=192.0.2.10
+USUARIO_V1=your_clock_user
+SENHA_V1=replace_me
+IP_V2=192.0.2.20
+USUARIO_V2=your_clock_user
+SENHA_V2=replace_me
 ```
 
 ### 5. Initialize state file
