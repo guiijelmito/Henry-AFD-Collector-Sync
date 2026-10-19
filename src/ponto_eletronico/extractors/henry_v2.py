@@ -3,23 +3,24 @@ import logging
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from config import (
-    URL_V2,
-    USUARIO_V2,
-    SENHA_V2,
+from ..config import (
     DIRETORIO_DOWNLOADS,
     HEADLESS_MODE,
+    SENHA_V2,
     SLOW_MO_MS,
+    URL_V2,
+    USUARIO_V2,
 )
-from logging_config import capturar_screenshot
+from ..logging_config import capturar_screenshot
 
 logger = logging.getLogger(__name__)
 
 # Caminhos base para persistência local do estado de controle de NSRs da V2
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = str(Path(__file__).resolve().parents[3])
 ARQUIVO_ESTADO = os.path.join(BASE_DIR, "estado_ponto.json")
 LOTE_SEMANAL = 146
 NSR_PADRAO_V2 = "00001153"
@@ -30,13 +31,11 @@ def carregar_estado(versao="v2"):
     logger.debug("Carregando estado (%s) de %s", versao, ARQUIVO_ESTADO)
 
     if not os.path.exists(ARQUIVO_ESTADO):
-        logger.warning(
-            "Arquivo de estado inexistente; usando NSR padrão inicial %s", NSR_PADRAO_V2
-        )
+        logger.warning("Arquivo de estado inexistente; usando NSR padrão inicial %s", NSR_PADRAO_V2)
         return NSR_PADRAO_V2
 
     try:
-        with open(ARQUIVO_ESTADO, "r") as f:
+        with open(ARQUIVO_ESTADO) as f:
             dados = json.load(f)
         # FIXME: chaves 'last_nsr_*' aqui divergem de 'last_nsr_*' usadas no módulo V1
         chave = "last_nsr_v1" if versao == "v1" else "last_nsr_v2"
@@ -61,7 +60,7 @@ def salvar_estado(novo_nsr, versao="v2"):
 
     if os.path.exists(ARQUIVO_ESTADO):
         try:
-            with open(ARQUIVO_ESTADO, "r") as f:
+            with open(ARQUIVO_ESTADO) as f:
                 dados = json.load(f)
         except json.JSONDecodeError:
             logger.exception(
@@ -109,8 +108,9 @@ def automatizar_download_afd_v2():
         browser = p.chromium.launch(
             headless=HEADLESS_MODE,
             slow_mo=SLOW_MO_MS,
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"])
-        
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        )
+
         page = browser.new_page()
         logger.debug("Navegador Chromium iniciado")
 
@@ -193,7 +193,7 @@ def automatizar_download_afd_v2():
 
 
 if __name__ == "__main__":
-    from logging_config import setup_logging
+    from ..logging_config import setup_logging
 
     setup_logging()
     automatizar_download_afd_v2()

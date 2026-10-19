@@ -4,37 +4,45 @@
 - Arquivo: RotatingFileHandler com milissegundos, módulo, função e linha (produção), sempre DEBUG.
 - Exceções não tratadas são registradas como CRITICAL com traceback completo.
 """
+
 import logging
 import os
 import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import ClassVar
+
+from dotenv import load_dotenv
+
+from .path_utils import configured_path
+
+load_dotenv()
 
 env_base = os.getenv("DIRETORIO_BASE")
-DIRETORIO_BASE = Path(env_base) if env_base else Path(__file__).resolve().parent
+DIRETORIO_BASE = configured_path(env_base, Path(__file__).resolve().parents[2])
 
-LOG_DIR = Path(os.getenv("LOG_DIR", DIRETORIO_BASE / "logs"))
+LOG_DIR = configured_path(os.getenv("LOG_DIR"), DIRETORIO_BASE / "logs")
 LOG_FILE = LOG_DIR / "afd_collector.log"
 SCREENSHOT_DIR = LOG_DIR / "screenshots"
 
 CONSOLE_FORMAT = "%(asctime)s [%(levelname)s] [%(filename)s:%(lineno)d] - %(message)s"
 CONSOLE_DATEFMT = "%d/%m/%Y - %H:%M:%S"
 FILE_FORMAT = (
-    "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s | "
-    "%(funcName)s:%(lineno)d | %(message)s"
+    "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s | %(funcName)s:%(lineno)d | %(message)s"
 )
 FILE_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
 
 class ColorFormatter(logging.Formatter):
     """Formatter de console com cor por nível (desativa se não for TTY)."""
 
     RESET = "\033[0m"
-    COLORS = {
-        "DEBUG": "\033[36m",     # ciano
-        "INFO": "\033[32m",      # verde
-        "WARNING": "\033[33m",   # amarelo
-        "ERROR": "\033[31m",     # vermelho
+    COLORS: ClassVar[dict[str, str]] = {
+        "DEBUG": "\033[36m",  # ciano
+        "INFO": "\033[32m",  # verde
+        "WARNING": "\033[33m",  # amarelo
+        "ERROR": "\033[31m",  # vermelho
         "CRITICAL": "\033[1;41m",  # branco sobre vermelho
     }
 

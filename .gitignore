@@ -1,25 +1,18 @@
-# --- AMBIENTE VIRTUAL E DEPENDÊNCIAS ---
 venv/
+.venv/
 env/
 ENV/
-logs/
-.venv/
+.env
 __pycache__/
 *.py[cod]
-*$py.class
-
-# --- CONFIGURAÇÕES SENSÍVEIS (NUNCA SUBIR PARA O GIT) ---
-.env
-
-# --- DADOS DE PRODUÇÃO E ESTADO DO ROBÔ ---
-# Ignora os arquivos de estado locais e os arquivos AFD baixados para não sujar o repositório
 estado_ponto.json
 afd_downloads/
-
-# --- LOGS E ARQUIVOS TEMPORÁRIOS DO PLAYWRIGHT / SISTEMA ---
+logs/
 *.log
-.DS_Store
-Thumbs.db
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.tmp/
 playwright-report/
 test-results/
-log.txt

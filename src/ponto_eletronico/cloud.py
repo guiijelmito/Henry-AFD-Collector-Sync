@@ -5,7 +5,7 @@ import time
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-from logging_config import capturar_screenshot
+from .logging_config import capturar_screenshot
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def enviar_afd_para_servidor(caminho_arquivo_afd: str, unidade: str = "V1"):
     ]
     if faltando:
         logger.critical("Variáveis de ambiente ausentes no .env: %s", ", ".join(faltando))
-        raise EnvironmentError(f"Variáveis de ambiente ausentes: {', '.join(faltando)}")
+        raise OSError(f"Variáveis de ambiente ausentes: {', '.join(faltando)}")
 
     if not os.path.exists(caminho_arquivo_afd):
         logger.error("Arquivo AFD não encontrado: %s", caminho_arquivo_afd)
@@ -46,7 +46,9 @@ def enviar_afd_para_servidor(caminho_arquivo_afd: str, unidade: str = "V1"):
         "Iniciando upload [%s] | arquivo=%s (%d bytes)", unidade, caminho_arquivo_afd, tamanho
     )
     if tamanho == 0:
-        logger.warning("Arquivo AFD [%s] está vazio (0 bytes); o upload pode ser rejeitado", unidade)
+        logger.warning(
+            "Arquivo AFD [%s] está vazio (0 bytes); o upload pode ser rejeitado", unidade
+        )
 
     with sync_playwright() as p:
         headless = os.getenv("HEADLESS_MODE", "False").lower() == "true"

@@ -3,23 +3,24 @@ import logging
 import os
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from config import (
-    URL_V1,
-    USUARIO_V1,
-    SENHA_V1,
+from ..config import (
     DIRETORIO_DOWNLOADS,
     HEADLESS_MODE,
+    SENHA_V1,
     SLOW_MO_MS,
+    URL_V1,
+    USUARIO_V1,
 )
-from logging_config import capturar_screenshot
+from ..logging_config import capturar_screenshot
 
 logger = logging.getLogger(__name__)
 
 # Caminhos base para persistência local do estado de controle de NSRs
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = str(Path(__file__).resolve().parents[3])
 ARQUIVO_ESTADO = os.path.join(BASE_DIR, "estado_ponto.json")
 LOTE_SEMANAL = 146  # 7 func x 4 pontos x 5 dias + 6 de gordurinha
 NSR_PADRAO_V1 = "000045076"
@@ -30,13 +31,11 @@ def carregar_estado(versao="v1"):
     logger.debug("Carregando estado (%s) de %s", versao, ARQUIVO_ESTADO)
 
     if not os.path.exists(ARQUIVO_ESTADO):
-        logger.warning(
-            "Arquivo de estado inexistente; usando NSR padrão inicial %s", NSR_PADRAO_V1
-        )
+        logger.warning("Arquivo de estado inexistente; usando NSR padrão inicial %s", NSR_PADRAO_V1)
         return NSR_PADRAO_V1
 
     try:
-        with open(ARQUIVO_ESTADO, "r") as f:
+        with open(ARQUIVO_ESTADO) as f:
             dados = json.load(f)
         chave = "last_nsr_v1" if versao == "v1" else "last_nsr_v2"
         valor = dados.get(chave)
@@ -62,7 +61,7 @@ def salvar_estado(novo_nsr, versao="v1"):
 
     if os.path.exists(ARQUIVO_ESTADO):
         try:
-            with open(ARQUIVO_ESTADO, "r") as f:
+            with open(ARQUIVO_ESTADO) as f:
                 dados = json.load(f)
         except json.JSONDecodeError:
             logger.exception(
@@ -71,7 +70,7 @@ def salvar_estado(novo_nsr, versao="v1"):
             dados = {}
 
     chave = f"last_nsr_{versao}"
-    
+
     data_coleta = dados.get("next_date")
     data_hoje = datetime.now()
     logger.debug("Validando janela de coleta | hoje=%s next_date=%s", data_hoje, data_coleta)
@@ -93,7 +92,8 @@ def salvar_estado(novo_nsr, versao="v1"):
             data_coleta,
         )
         return
-    
+
+
 def automatizar_download_afd_v1():
     inicio = time.perf_counter()
     data_hoje = datetime.now().strftime("%d-%m-%Y")
@@ -126,8 +126,9 @@ def automatizar_download_afd_v1():
         browser = p.chromium.launch(
             headless=HEADLESS_MODE,
             slow_mo=SLOW_MO_MS,
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"])
-        
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        )
+
         page = browser.new_page()
         logger.debug("Navegador Chromium iniciado")
 
@@ -155,9 +156,7 @@ def automatizar_download_afd_v1():
                     )
                     logger.info("Sessão V1 já autenticada")
                 except Exception:
-                    logger.exception(
-                        "Sessão expirada ou estado inesperado; recarregando a página"
-                    )
+                    logger.exception("Sessão expirada ou estado inesperado; recarregando a página")
                     page.reload()
                     page.wait_for_load_state("networkidle")
 
@@ -236,7 +235,7 @@ def automatizar_download_afd_v1():
 
 
 if __name__ == "__main__":
-    from logging_config import setup_logging
+    from ..logging_config import setup_logging
 
     setup_logging()
     automatizar_download_afd_v1()

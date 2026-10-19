@@ -99,17 +99,20 @@ python main.py
 ## 🗂️ Project Structure
 
 ```
-├── afd_downloads/         # Directory where downloaded AFD text files are stored
-├── .env                   # Sensitive credentials and URLs (git-ignored)
-├── .gitignore             # Excludes venv, .env, state files, and downloads
-├── config.py              # Configuration loader and environment variables bindings
-├── estado_ponto.json      # Dynamic state tracker for the last processed NSR
-├── extract_afc_v1.py      # Playwright automation script for Unit V1 (Local)
-├── extract_afc_v2.py      # Playwright automation script for Unit V2 (External via Tailscale)
-├── cloud.py               # Synchronization and automated web server upload module
-├── main.py                # Unified central orchestrator for the complete pipeline
-├── executar.bat           # Windows wrapper script for automated background task scheduling
-└── README.md              # Official project documentation
+├── src/ponto_eletronico/  # Aplicação e regras de negócio
+│   ├── config.py
+│   ├── pipeline.py
+│   ├── cloud.py
+│   ├── logging_config.py
+│   ├── path_utils.py
+│   └── extractors/        # Automações Henry V1 e V2
+├── config/                # Exemplos de configuração
+├── scripts/               # Execução e manutenção
+├── tests/unit/            # Teste de importação sem acessar relógios
+├── tests/integration/     # Testes que dependem da infraestrutura
+├── main.py                # Atalho compatível para iniciar o pipeline
+├── executar.bat           # Atalho para o agendador do Windows
+└── README.md
 ```
 
 ---
