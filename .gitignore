@@ -9,7 +9,13 @@ __pycache__/
 *$py.class
 
 # --- CONFIGURAÇÕES SENSÍVEIS (NUNCA SUBIR PARA O GIT) ---
-.env
+.env*
+!.env.example
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
 
 # --- DADOS DE PRODUÇÃO E ESTADO DO ROBÔ ---
 # Ignora os arquivos de estado locais e os arquivos AFD baixados para não sujar o repositório
