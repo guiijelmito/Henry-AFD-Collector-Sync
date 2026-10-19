@@ -12,8 +12,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-from config import HEADLESS_MODE, SLOW_MO_MS
-from logging_config import capturar_screenshot
+from .config import HEADLESS_MODE, SLOW_MO_MS
+from .logging_config import capturar_screenshot
 
 logger = logging.getLogger(__name__)
 

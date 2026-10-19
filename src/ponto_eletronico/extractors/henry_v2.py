@@ -9,7 +9,7 @@ from pathlib import Path
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
-from config import (
+from ..config import (
     DIRETORIO_DOWNLOADS,
     HEADLESS_MODE,
     SENHA_V2,
@@ -18,8 +18,8 @@ from config import (
     USUARIO_V2,
     validar_configuracao_relogio,
 )
-from logging_config import capturar_screenshot
-from state_store import audit_date_range, is_audit_due, record_audit_upload
+from ..logging_config import capturar_screenshot
+from ..state_store import audit_date_range, is_audit_due, record_audit_upload
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class TailnetConnectionError(ConnectionError):
 
 
 # Caminho do estado de auditoria semanal da unidade
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = str(Path(__file__).resolve().parents[3])
 ARQUIVO_ESTADO = os.path.join(BASE_DIR, "estado_ponto.json")
 
 
@@ -158,7 +158,7 @@ def automatizar_download_afd_v2():
 
 
 if __name__ == "__main__":
-    from logging_config import setup_logging
+    from ..logging_config import setup_logging
 
     setup_logging()
     automatizar_download_afd_v2()

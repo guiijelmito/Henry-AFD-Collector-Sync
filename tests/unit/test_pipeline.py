@@ -1,8 +1,8 @@
 """Verifica a janela de execução e a ordem de upload no pipeline."""
 
-import main
-from extract_afc_v2 import TailnetConnectionError
-from state_store import AuditScheduleConfigurationError
+from ponto_eletronico import pipeline as main
+from ponto_eletronico.extractors.henry_v2 import TailnetConnectionError
+from ponto_eletronico.state_store import AuditScheduleConfigurationError
 
 
 def test_cursor_registration_happens_after_upload_returns(tmp_path, monkeypatch):

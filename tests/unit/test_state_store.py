@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from state_store import (
+from ponto_eletronico.state_store import (
     AuditScheduleConfigurationError,
     StateIntegrityError,
     audit_date_range,
@@ -126,7 +126,9 @@ def test_failed_temporary_write_preserves_existing_state(tmp_path, monkeypatch):
     def fail_temporary_file(**kwargs):
         raise OSError("disk unavailable")
 
-    monkeypatch.setattr("state_store.tempfile.NamedTemporaryFile", fail_temporary_file)
+    monkeypatch.setattr(
+        "ponto_eletronico.state_store.tempfile.NamedTemporaryFile", fail_temporary_file
+    )
     with pytest.raises(OSError, match="disk unavailable"):
         record_audit_upload(state_path, "v1", FRIDAY)
     assert state_path.read_text(encoding="utf-8") == original

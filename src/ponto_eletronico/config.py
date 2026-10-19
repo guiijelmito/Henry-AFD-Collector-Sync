@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[2]
 DIRETORIO_BASE = Path(os.getenv("DIRETORIO_BASE") or BASE_DIR).expanduser()
 DIRETORIO_DOWNLOADS = Path(
     os.getenv("DIRETORIO_DOWNLOADS") or DIRETORIO_BASE / "afd_downloads"

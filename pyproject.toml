@@ -15,13 +15,13 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 minversion = "9.1"
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]
 addopts = "-ra --strict-markers --strict-config --basetemp=.tmp/pytest-basetemp"
 filterwarnings = ["error"]
 
 [tool.coverage.run]
 branch = true
-source = ["state_store"]
+source = ["ponto_eletronico.state_store"]
 
 [tool.coverage.report]
 fail_under = 90
