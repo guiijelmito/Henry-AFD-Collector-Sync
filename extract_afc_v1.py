@@ -1,15 +1,9 @@
-"""Extrai arquivos AFD do relógio de ponto V1.
-
-O cursor salvo define o início de um bloco fixo de NSRs. Cada execução baixa e
-envia o bloco quando a janela semanal da V1 vence. Fora da janela, o pipeline
-não acessa o relógio nem envia arquivo ao servidor, preservando edições manuais.
-Falhas mantêm o cursor para que o mesmo bloco possa ser tentado novamente.
-"""
+"""Extrai o AFD da V1 pela janela de data/hora da semana de auditoria."""
 
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -24,87 +18,40 @@ from config import (
     validar_configuracao_relogio,
 )
 from logging_config import capturar_screenshot
-from state_store import (
-    StateIntegrityError,
-    advance_nsr_after_upload,
-    is_nsr_advance_due,
-    load_nsr,
-)
+from state_store import audit_date_range, is_audit_due, record_audit_upload
 
 logger = logging.getLogger(__name__)
 
-# Caminhos base para persistência local do estado de controle de NSRs
+# Caminho do estado de auditoria semanal da unidade
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ARQUIVO_ESTADO = os.path.join(BASE_DIR, "estado_ponto.json")
-LOTE_SEMANAL = 146  # 7 func x 4 pontos x 5 dias + 6 de gordurinha
-NSR_PADRAO_V1 = "000045076"
-
-
-def carregar_estado(versao="v1"):
-    """Lê e normaliza o cursor da V1, parando se o estado estiver corrompido."""
-    logger.debug("Carregando estado (%s) de %s", versao, ARQUIVO_ESTADO)
-    try:
-        valor = load_nsr(ARQUIVO_ESTADO, versao, NSR_PADRAO_V1)
-    except StateIntegrityError:
-        logger.exception("Estado de coleta inválido; interrompendo para preservar o cursor")
-        raise
-    logger.debug("Estado carregado | last_nsr_%s=%s", versao, valor)
-    return valor
-
-
-def salvar_estado(novo_nsr, versao="v1"):
-    """Após o envio do arquivo, avança o cursor se a janela semanal venceu.
-
-    A data é verificada como próximo horário permitido. Execuções atrasadas
-    continuam elegíveis; execuções dentro da janela deixam o cursor intacto.
-    Um estado inicial sem cursor avança no primeiro upload; cursores existentes
-    sem horário de janela ficam bloqueados pelo pipeline até serem configurados.
-    """
-    logger.debug("Salvando estado | versao=%s novo_nsr=%s", versao, novo_nsr)
-    if not advance_nsr_after_upload(
-        ARQUIVO_ESTADO,
-        versao,
-        novo_nsr,
-        now=datetime.now().astimezone(),
-    ):
-        logger.warning(
-            "Janela semanal ainda aberta; cursor %s permanece inalterado",
-            versao.upper(),
-        )
-        return
-    logger.info("Estado atualizado (last_nsr_%s=%s)", versao, novo_nsr)
 
 
 def janela_semanal_vencida():
-    """Informa se o pipeline pode executar a coleta e o upload da V1."""
-    return is_nsr_advance_due(ARQUIVO_ESTADO, "v1", datetime.now().astimezone())
+    """Informa se a coleta e o upload V1 são permitidos nesta sexta-feira."""
+    return is_audit_due(ARQUIVO_ESTADO, "v1", datetime.now().astimezone())
 
 
 def registrar_upload_enviado():
-    """Confirma no estado o lote enviado quando a janela permite avançar."""
-    nsr_atual = int(carregar_estado("v1"))
-    salvar_estado(f"{nsr_atual + LOTE_SEMANAL:09d}", "v1")
+    """Agenda a próxima auditoria V1 após upload bem-sucedido."""
+    if not record_audit_upload(ARQUIVO_ESTADO, "v1", datetime.now().astimezone()):
+        logger.warning("Auditoria V1 não registrada: fora da sexta-feira permitida")
 
 
 def automatizar_download_afd_v1():
-    """Baixa o próximo bloco AFD V1; o pipeline verifica a janela antes de chamar."""
+    """Baixa os registros V1 de segunda-feira até agora na sexta de auditoria."""
     validar_configuracao_relogio("v1")
     Path(DIRETORIO_DOWNLOADS).mkdir(parents=True, exist_ok=True)
     inicio = time.perf_counter()
-    data_hoje = datetime.now().strftime("%d-%m-%Y")
-
-    nsr_inicial_str = carregar_estado()
-    nsr_inicial_int = int(nsr_inicial_str)
-    nsr_final_int = nsr_inicial_int + LOTE_SEMANAL
-
-    NSR_INICIAL = f"{nsr_inicial_int:09d}"
-    NSR_FINAL = f"{nsr_final_int:09d}"
+    agora = datetime.now().astimezone()
+    data_inicial, data_final = audit_date_range(agora)
+    segunda_data = (agora - timedelta(days=agora.weekday())).strftime("%Y-%m-%d")
+    data_hoje = agora.strftime("%Y-%m-%d")
 
     logger.info(
-        "Ciclo de coleta V1 iniciado | NSR %s -> %s (lote=%d)",
-        NSR_INICIAL,
-        NSR_FINAL,
-        LOTE_SEMANAL,
+        "Coleta V1 por data/hora iniciada | %s -> %s",
+        data_inicial,
+        data_final,
     )
     logger.debug(
         "Parâmetros | headless=%s slow_mo=%sms destino=%s",
@@ -114,7 +61,8 @@ def automatizar_download_afd_v1():
     )
 
     caminho_salvo = os.path.join(
-        DIRETORIO_DOWNLOADS, f"AFD_V1_{NSR_INICIAL}_a_{NSR_FINAL}_{data_hoje}.txt"
+        DIRETORIO_DOWNLOADS,
+        f"AFD_V1_{segunda_data}_a_{data_hoje}.txt",
     )
 
     with sync_playwright() as p:
@@ -172,20 +120,22 @@ def automatizar_download_afd_v1():
             menu_download.click()
             page.wait_for_load_state("networkidle")
 
-            logger.info("Selecionando o filtro por NSR")
-            filtro_nsr = page.locator("a[onclick*=\"navigationsa('visibleDiv', 'geral')\"]")
-            filtro_nsr.wait_for(state="visible", timeout=15000)
-            filtro_nsr.click()
+            logger.info("Selecionando o filtro por data/hora")
+            filtro_data_hora = page.locator(
+                "a[onclick*=\"navigationsa('visibleDiv', 'communication')\"]"
+            )
+            filtro_data_hora.wait_for(state="visible", timeout=15000)
+            filtro_data_hora.click()
             page.wait_for_load_state("networkidle")
 
-            logger.info("Inserindo range de NSR: %s -> %s", NSR_INICIAL, NSR_FINAL)
-            page.locator("#lblNsrI").wait_for(state="visible", timeout=10000)
-            page.locator("#lblNsrI").fill(NSR_INICIAL)
-            page.locator("#lblNsrF").fill(NSR_FINAL)
+            logger.info("Inserindo período de data/hora: %s -> %s", data_inicial, data_final)
+            page.locator("#lblDataI").wait_for(state="visible", timeout=10000)
+            page.locator("#lblDataI").fill(data_inicial)
+            page.locator("#lblDataF").fill(data_final)
 
             logger.info("Disparando o download do AFD")
             try:
-                botao_baixar = page.locator("a[onclick*='subCompD(5, 8, 1);']")
+                botao_baixar = page.locator("a[onclick*='subCompD(5, 8, 2);']")
                 botao_baixar.scroll_into_view_if_needed()
                 botao_baixar.wait_for(state="visible", timeout=10000)
 

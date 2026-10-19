@@ -1,10 +1,8 @@
-"""Leitura e gravação segura do cursor de coleta de cada relógio.
+"""Persistência dos horários de auditoria das unidades V1 e V2.
 
-O arquivo JSON compartilhado pode guardar cursores independentes da V1 e da
-V2, além de metadados como ``next_date``. Ausência do arquivo significa início
-de coleta; conteúdo inválido interrompe o processo para evitar sobrescrever um
-cursor recuperável. As gravações substituem o arquivo por meio de um temporário
-no mesmo diretório.
+O arquivo mantém somente a próxima data permitida para upload de cada unidade.
+As chaves históricas de janela são aceitas durante a migração, mas não são mais
+gravadas. O upload só pode ocorrer numa sexta-feira após o vencimento.
 """
 
 from __future__ import annotations
@@ -20,15 +18,15 @@ from typing import Any
 
 
 class StateIntegrityError(ValueError):
-    """Indica que o arquivo de estado existe, mas não pode ser confiado."""
+    """O arquivo de estado existe, mas não pode ser interpretado com segurança."""
 
 
-class NsrWindowConfigurationError(StateIntegrityError):
-    """Indica que há cursor salvo, mas falta a data que libera o próximo ciclo."""
+class AuditScheduleConfigurationError(StateIntegrityError):
+    """A unidade tem estado prévio, mas não tem data de auditoria configurada."""
 
 
 def load_state_data(path: str | Path) -> dict[str, Any]:
-    """Lê o JSON de estado; só um arquivo ausente é tratado como estado vazio."""
+    """Lê o JSON de estado; somente a ausência do arquivo significa estado vazio."""
     state_path = Path(path)
     try:
         with state_path.open("r", encoding="utf-8") as state_file:
@@ -36,109 +34,75 @@ def load_state_data(path: str | Path) -> dict[str, Any]:
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError as exc:
-        raise StateIntegrityError(
-            f"Arquivo de estado inválido em {state_path}; o cursor foi preservado"
-        ) from exc
+        raise StateIntegrityError(f"Arquivo de estado inválido: {state_path}") from exc
 
     if not isinstance(data, dict):
         raise StateIntegrityError(f"Arquivo de estado deve conter um objeto JSON: {state_path}")
     return data
 
 
-def normalize_nsr(value: Any) -> str:
-    """Valida um NSR decimal e retorna-o com pelo menos nove dígitos."""
-    if isinstance(value, bool):
-        raise StateIntegrityError("O NSR deve ser um número inteiro não negativo")
-
-    text = str(value).strip()
-    if not text or not text.isascii() or not text.isdigit():
-        raise StateIntegrityError("O NSR deve conter apenas dígitos ASCII")
-    return f"{int(text):09d}"
+def _current_time(now: datetime | None) -> datetime:
+    current_time = now or datetime.now().astimezone()
+    return current_time.astimezone() if current_time.tzinfo is None else current_time
 
 
-def load_nsr(path: str | Path, version: str, default: str) -> str:
-    """Retorna o cursor da unidade em nove dígitos, aceitando o campo legado da V1.
+def audit_date_range(now: datetime | None = None) -> tuple[str, str]:
+    """Retorna segunda-feira 00:00 até o momento atual, aceitando somente sexta."""
+    current_time = _current_time(now)
+    if current_time.weekday() != 4:
+        raise ValueError("A coleta e auditoria semanal só podem ocorrer na sexta-feira")
+    monday = (current_time - timedelta(days=4)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return (
+        monday.strftime("%d/%m/%Y %H:%M:%S"),
+        current_time.strftime("%d/%m/%Y %H:%M:%S"),
+    )
 
-    O campo ``ultimo_nsr`` só é consultado quando falta ``last_nsr_v1``; ele
-    nunca é usado como cursor da V2.
-    """
-    if version not in {"v1", "v2"}:
-        raise ValueError(f"Versão de relógio desconhecida: {version}")
 
-    data = load_state_data(path)
-    value = data.get(f"last_nsr_{version}")
+def _schedule_value(data: Mapping[str, Any], version: str) -> str | None:
+    value = data.get(f"next_audit_at_{version}")
+    if value is None:
+        value = data.get(f"next_advance_at_{version}")
     if value is None and version == "v1":
-        value = data.get("ultimo_nsr")
-    return normalize_nsr(default if value is None else value)
+        value = data.get("next_date")
+    if value is not None and not isinstance(value, str):
+        raise StateIntegrityError("A próxima auditoria deve ser texto ISO-8601")
+    return value
 
 
-def save_nsr(
-    path: str | Path,
-    version: str,
-    value: Any,
-    extra_values: Mapping[str, Any] | None = None,
-) -> None:
-    """Atualiza um cursor sem descartar estado da outra unidade.
-
-    ``extra_values`` permite atualizar metadados relacionados à coleta na
-    mesma gravação atômica do cursor.
-    """
-    if version not in {"v1", "v2"}:
-        raise ValueError(f"Versão de relógio desconhecida: {version}")
-
-    data = load_state_data(path)
-    data[f"last_nsr_{version}"] = normalize_nsr(value)
-    if extra_values:
-        data.update(extra_values)
-    write_state_data(path, data)
-
-
-def is_nsr_advance_due(
+def is_audit_due(
     path: str | Path,
     version: str,
     now: datetime | None = None,
 ) -> bool:
-    """Informa se o cursor da unidade já pode avançar pela janela semanal.
-
-    A data legada ``next_date`` é aceita como vencimento da V1. Sem uma data,
-    um relógio sem cursor salvo está em sua primeira coleta; um cursor existente
-    sem janela causa erro e bloqueia o envio até a configuração explícita.
-    Datas ISO sem horário são interpretadas como início do dia no fuso local.
-    """
+    """Retorna verdadeiro somente na sexta-feira e após a data agendada."""
     if version not in {"v1", "v2"}:
         raise ValueError(f"Versão de relógio desconhecida: {version}")
 
-    current_time = now or datetime.now().astimezone()
-    if current_time.tzinfo is None:
-        current_time = current_time.astimezone()
+    current_time = _current_time(now)
+    if current_time.weekday() != 4:
+        return False
 
     data = load_state_data(path)
-    value = data.get(f"next_advance_at_{version}")
-    if value is None and version == "v1":
-        value = data.get("next_date")
+    value = _schedule_value(data, version)
     if value is None:
-        cursor = data.get(f"last_nsr_{version}")
-        if cursor is None and version == "v1":
-            cursor = data.get("ultimo_nsr")
-        if cursor is None:
-            return True
-        raise NsrWindowConfigurationError(
-            f"Janela semanal do relógio {version.upper()} ausente; upload bloqueado "
-            "até configurar o próximo horário permitido"
-        )
-    if not isinstance(value, str):
-        raise StateIntegrityError("O horário de avanço deve ser texto ISO-8601")
+        legacy_has_state = any(key in data for key in ("last_nsr_v1", "last_nsr_v2", "ultimo_nsr"))
+        if legacy_has_state:
+            raise AuditScheduleConfigurationError(
+                f"Data de auditoria da unidade {version.upper()} ausente"
+            )
+        return True
 
     try:
         if len(value) == 10:
-            due_date = datetime.strptime(value, "%Y-%m-%d").date()
-            due_at = datetime.combine(due_date, datetime_time.min, tzinfo=current_time.tzinfo)
+            due_at = datetime.combine(
+                datetime.strptime(value, "%Y-%m-%d").date(),
+                datetime_time.min,
+                tzinfo=current_time.tzinfo,
+            )
         else:
             due_at = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise StateIntegrityError(
-            f"Data de avanço inválida para o relógio {version.upper()}: {value!r}"
-        ) from exc
+        raise StateIntegrityError(f"Data de auditoria inválida: {value!r}") from exc
 
     if due_at.tzinfo is None:
         due_at = due_at.replace(tzinfo=current_time.tzinfo)
@@ -147,44 +111,37 @@ def is_nsr_advance_due(
     return current_time >= due_at
 
 
-def advance_nsr_after_upload(
+def record_audit_upload(
     path: str | Path,
     version: str,
-    value: Any,
     now: datetime | None = None,
 ) -> bool:
-    """Avança o cursor e agenda sete dias após um upload sem erro.
-
-    Retorna ``False`` quando a janela ainda está fechada. Cursor e próxima
-    janela são persistidos juntos; a chave legada da V1 é removida na migração.
-    """
+    """Agenda a próxima sexta-feira após upload bem-sucedido; fora da janela, não grava."""
     if version not in {"v1", "v2"}:
         raise ValueError(f"Versão de relógio desconhecida: {version}")
 
-    current_time = now or datetime.now().astimezone()
-    if current_time.tzinfo is None:
-        current_time = current_time.astimezone()
-
-    data = load_state_data(path)
-    schedule_key = f"next_advance_at_{version}"
-
-    if not is_nsr_advance_due(path, version, current_time):
+    current_time = _current_time(now)
+    if not is_audit_due(path, version, current_time):
         return False
 
-    data[f"last_nsr_{version}"] = normalize_nsr(value)
-    data[schedule_key] = (current_time + timedelta(days=7)).isoformat(timespec="seconds")
+    data = load_state_data(path)
+    data[f"next_audit_at_{version}"] = (current_time + timedelta(days=7)).isoformat(
+        timespec="seconds"
+    )
+    data.pop(f"next_advance_at_{version}", None)
     if version == "v1":
         data.pop("next_date", None)
+    for key in ("last_nsr_v1", "last_nsr_v2", "ultimo_nsr"):
+        data.pop(key, None)
     write_state_data(path, data)
     return True
 
 
 def write_state_data(path: str | Path, data: Mapping[str, Any]) -> None:
-    """Grava um objeto JSON por substituição atômica no mesmo diretório."""
+    """Grava o JSON por substituição atômica no mesmo diretório."""
     state_path = Path(path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
-
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -199,7 +156,6 @@ def write_state_data(path: str | Path, data: Mapping[str, Any]) -> None:
             temporary_file.write("\n")
             temporary_file.flush()
             os.fsync(temporary_file.fileno())
-
         os.replace(temporary_path, state_path)
     finally:
         if temporary_path is not None:

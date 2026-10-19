@@ -21,7 +21,7 @@ from extract_afc_v1 import registrar_upload_enviado as registrar_upload_v1  # no
 from extract_afc_v2 import TailnetConnectionError, automatizar_download_afd_v2  # noqa: E402
 from extract_afc_v2 import janela_semanal_vencida as janela_v2_vencida  # noqa: E402
 from extract_afc_v2 import registrar_upload_enviado as registrar_upload_v2  # noqa: E402
-from state_store import NsrWindowConfigurationError  # noqa: E402
+from state_store import AuditScheduleConfigurationError  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def _processar_unidade(
         )
         return "SEM_ARQUIVO"
 
-    except NsrWindowConfigurationError as exc:
+    except AuditScheduleConfigurationError as exc:
         logger.error("Execução da unidade %s bloqueada pela janela semanal: %s", unidade, exc)
         return "JANELA_NAO_CONFIGURADA"
 

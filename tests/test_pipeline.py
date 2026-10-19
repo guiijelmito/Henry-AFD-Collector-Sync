@@ -2,7 +2,7 @@
 
 import main
 from extract_afc_v2 import TailnetConnectionError
-from state_store import NsrWindowConfigurationError
+from state_store import AuditScheduleConfigurationError
 
 
 def test_cursor_registration_happens_after_upload_returns(tmp_path, monkeypatch):
@@ -68,7 +68,7 @@ def test_closed_window_skips_extraction_upload_and_cursor_registration(monkeypat
 
 def test_missing_window_configuration_has_specific_status_and_message(caplog):
     def missing_window():
-        raise NsrWindowConfigurationError("Janela semanal do relógio V2 ausente")
+        raise AuditScheduleConfigurationError("Data de auditoria V2 ausente")
 
     status = main._processar_unidade("V2", "2/2", missing_window, lambda: None, lambda: None)
 

@@ -1,284 +1,137 @@
-"""Testes de integridade e compatibilidade do estado persistido da coleta.
-
-Os casos usam arquivos temporários para comprovar que entradas inválidas não
-alteram o cursor real nem sobrescrevem o JSON existente.
-"""
-
 import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from state_store import (
-    NsrWindowConfigurationError,
+    AuditScheduleConfigurationError,
     StateIntegrityError,
-    advance_nsr_after_upload,
-    is_nsr_advance_due,
-    load_nsr,
+    audit_date_range,
+    is_audit_due,
     load_state_data,
-    normalize_nsr,
-    save_nsr,
+    record_audit_upload,
 )
 
+TZ = timezone(timedelta(hours=-3))
+FRIDAY = datetime(2026, 10, 23, 15, tzinfo=TZ)
 
-def test_missing_state_uses_unit_default(tmp_path):
-    assert load_nsr(tmp_path / "state.json", "v1", "45076") == "000045076"
+
+def test_audit_date_range_is_monday_to_current_friday():
+    assert audit_date_range(FRIDAY) == (
+        "19/10/2026 00:00:00",
+        "23/10/2026 15:00:00",
+    )
 
 
-def test_v1_reads_legacy_cursor(tmp_path):
+def test_audit_date_range_rejects_non_friday():
+    with pytest.raises(ValueError, match="sexta-feira"):
+        audit_date_range(FRIDAY - timedelta(days=1))
+
+
+def test_audit_is_never_due_outside_friday_even_if_schedule_passed(tmp_path):
     state_path = tmp_path / "state.json"
-    state_path.write_text('{"ultimo_nsr": "123"}', encoding="utf-8")
-
-    assert load_nsr(state_path, "v1", "45076") == "000000123"
-
-
-def test_v2_uses_default_when_only_legacy_v1_cursor_exists(tmp_path):
-    state_path = tmp_path / "state.json"
-    state_path.write_text('{"ultimo_nsr": "123"}', encoding="utf-8")
-
-    assert load_nsr(state_path, "v2", "1153") == "000001153"
-
-
-@pytest.mark.parametrize("contents", ["{", "[]", '"not an object"'])
-def test_invalid_state_fails_closed_without_rewriting_file(tmp_path, contents):
-    state_path = tmp_path / "state.json"
-    state_path.write_text(contents, encoding="utf-8")
-
-    with pytest.raises(StateIntegrityError):
-        load_state_data(state_path)
-    with pytest.raises(StateIntegrityError):
-        save_nsr(state_path, "v1", "900")
-
-    assert state_path.read_text(encoding="utf-8") == contents
-
-
-@pytest.mark.parametrize("value", [None, True, -1, "12A", "١٢٣"])
-def test_nsr_must_be_non_negative_ascii_digits(value):
-    with pytest.raises(StateIntegrityError):
-        normalize_nsr(value)
-
-
-def test_save_preserves_other_unit_and_extra_state(tmp_path):
-    state_path = tmp_path / "nested" / "state.json"
-    state_path.parent.mkdir()
     state_path.write_text(
-        json.dumps({"last_nsr_v2": "000000010", "next_date": "2026-10-01"}),
+        json.dumps({"next_audit_at_v1": "2026-10-01T00:00:00-03:00"}), encoding="utf-8"
+    )
+
+    assert not is_audit_due(state_path, "v1", FRIDAY - timedelta(days=1))
+    assert is_audit_due(state_path, "v1", FRIDAY)
+
+
+def test_existing_schedule_waits_until_due_friday(tmp_path):
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps({"next_audit_at_v2": "2026-10-30T09:00:00-03:00"}), encoding="utf-8"
+    )
+
+    assert not is_audit_due(state_path, "v2", FRIDAY)
+    assert is_audit_due(state_path, "v2", FRIDAY + timedelta(days=7))
+
+
+def test_first_audit_is_allowed_on_friday_without_state(tmp_path):
+    assert is_audit_due(tmp_path / "missing.json", "v1", FRIDAY)
+
+
+def test_legacy_cursor_without_schedule_blocks_audit(tmp_path):
+    state_path = tmp_path / "state.json"
+    state_path.write_text('{"last_nsr_v1": "45660"}', encoding="utf-8")
+
+    with pytest.raises(AuditScheduleConfigurationError):
+        is_audit_due(state_path, "v1", FRIDAY)
+
+
+def test_successful_upload_migrates_schedule_and_removes_saved_nsr_cursors(tmp_path):
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_nsr_v1": "45660",
+                "last_nsr_v2": "1329",
+                "next_advance_at_v1": "2026-10-23T09:00:00-03:00",
+                "next_advance_at_v2": "2026-10-23T09:00:00-03:00",
+            }
+        ),
         encoding="utf-8",
     )
 
-    save_nsr(state_path, "v1", "45123", {"next_date": "2026-10-20"})
-
-    assert json.loads(state_path.read_text(encoding="utf-8")) == {
-        "last_nsr_v1": "000045123",
-        "last_nsr_v2": "000000010",
-        "next_date": "2026-10-20",
+    assert record_audit_upload(state_path, "v1", FRIDAY)
+    data = load_state_data(state_path)
+    assert data == {
+        "next_advance_at_v2": "2026-10-23T09:00:00-03:00",
+        "next_audit_at_v1": "2026-10-30T15:00:00-03:00",
     }
-    assert list(state_path.parent.glob("*.tmp")) == []
+    assert not list(tmp_path.glob("*.tmp"))
 
 
-def test_save_nsr_without_extra_values(tmp_path):
+def test_upload_does_not_write_when_outside_friday_window(tmp_path):
     state_path = tmp_path / "state.json"
-    save_nsr(state_path, "v2", "42")
-
-    assert json.loads(state_path.read_text(encoding="utf-8")) == {"last_nsr_v2": "000000042"}
-
-
-@pytest.mark.parametrize("version", ["v3", "V1"])
-def test_state_helpers_reject_unknown_clock_version(tmp_path, version):
-    with pytest.raises(ValueError):
-        load_nsr(tmp_path / "state.json", version, "1")
-    with pytest.raises(ValueError):
-        save_nsr(tmp_path / "state.json", version, "1")
-    with pytest.raises(ValueError):
-        is_nsr_advance_due(tmp_path / "state.json", version)
-    with pytest.raises(ValueError):
-        advance_nsr_after_upload(tmp_path / "state.json", version, "1")
-
-
-def test_nsr_normalization_keeps_values_longer_than_nine_digits():
-    assert normalize_nsr("1000000000") == "1000000000"
-
-
-def test_existing_cursor_without_window_is_blocked_for_safety(tmp_path):
-    state_path = tmp_path / "state.json"
-    state_path.write_text('{"last_nsr_v1": "100"}', encoding="utf-8")
-    now = datetime(2026, 10, 13, 15, tzinfo=timezone(timedelta(hours=-3)))
-
-    with pytest.raises(NsrWindowConfigurationError, match="upload bloqueado"):
-        is_nsr_advance_due(state_path, "v1", now)
-    with pytest.raises(NsrWindowConfigurationError, match="upload bloqueado"):
-        advance_nsr_after_upload(state_path, "v1", "246", now)
-
-    data = json.loads(state_path.read_text(encoding="utf-8"))
-    assert data == {"last_nsr_v1": "100"}
-
-
-def test_new_state_allows_first_cycle_and_stores_window_after_upload(tmp_path):
-    state_path = tmp_path / "state.json"
-    now = datetime(2026, 10, 13, 15, tzinfo=timezone(timedelta(hours=-3)))
-
-    assert is_nsr_advance_due(state_path, "v1", now)
-    assert advance_nsr_after_upload(state_path, "v1", "45222", now)
-
-    data = json.loads(state_path.read_text(encoding="utf-8"))
-    assert data["last_nsr_v1"] == "000045222"
-    assert data["next_advance_at_v1"] == "2026-10-20T15:00:00-03:00"
-
-
-def test_window_is_open_before_deadline_and_stays_open_when_run_is_late(tmp_path):
-    state_path = tmp_path / "state.json"
-    now = datetime(2026, 10, 13, 15, tzinfo=timezone.utc)
-    deadline = now + timedelta(days=7)
-    state_path.write_text(
-        json.dumps({"last_nsr_v1": "100", "next_advance_at_v1": deadline.isoformat()}),
-        encoding="utf-8",
-    )
-
-    assert not is_nsr_advance_due(state_path, "v1", deadline - timedelta(seconds=1))
-    assert is_nsr_advance_due(state_path, "v1", deadline)
-    assert is_nsr_advance_due(state_path, "v1", deadline + timedelta(days=1))
-
-
-def test_upload_inside_window_keeps_cursor_and_schedule(tmp_path):
-    state_path = tmp_path / "state.json"
-    now = datetime(2026, 10, 13, 15, tzinfo=timezone.utc)
-    deadline = now + timedelta(days=7)
-    original = {
-        "last_nsr_v1": "100",
-        "next_advance_at_v1": deadline.isoformat(),
-    }
+    original = {"next_audit_at_v1": "2026-10-23T16:00:00-03:00"}
     state_path.write_text(json.dumps(original), encoding="utf-8")
 
-    advanced = advance_nsr_after_upload(
-        state_path, "v1", "000000246", deadline - timedelta(seconds=1)
-    )
-
-    assert not advanced
-    assert json.loads(state_path.read_text(encoding="utf-8")) == original
+    assert not record_audit_upload(state_path, "v1", FRIDAY)
+    assert load_state_data(state_path) == original
 
 
-def test_late_success_advances_once_and_schedules_from_actual_run_time(tmp_path):
+def test_legacy_v1_next_date_is_migrated_after_upload(tmp_path):
     state_path = tmp_path / "state.json"
-    initial_run = datetime(2026, 10, 13, 15, tzinfo=timezone.utc)
-    deadline = initial_run + timedelta(days=7)
-    late_run = deadline + timedelta(days=1)
-    state_path.write_text(
-        json.dumps({"last_nsr_v1": "100", "next_advance_at_v1": deadline.isoformat()}),
-        encoding="utf-8",
-    )
+    state_path.write_text('{"next_date": "2026-10-01"}', encoding="utf-8")
 
-    advanced = advance_nsr_after_upload(state_path, "v1", "246", late_run)
-
-    data = json.loads(state_path.read_text(encoding="utf-8"))
-    assert advanced
-    assert data["last_nsr_v1"] == "000000246"
-    assert data["next_advance_at_v1"] == (late_run + timedelta(days=7)).isoformat()
+    assert record_audit_upload(state_path, "v1", FRIDAY)
+    assert load_state_data(state_path) == {"next_audit_at_v1": "2026-10-30T15:00:00-03:00"}
 
 
-def test_legacy_v1_next_date_is_treated_as_due_date_and_migrated(tmp_path):
+def test_malformed_json_is_not_treated_as_empty_state(tmp_path):
     state_path = tmp_path / "state.json"
-    now = datetime(2026, 10, 13, 15, tzinfo=timezone.utc)
-    state_path.write_text(
-        json.dumps({"last_nsr_v1": "100", "next_date": "2026-10-06"}),
-        encoding="utf-8",
-    )
+    state_path.write_text("{broken", encoding="utf-8")
 
-    assert is_nsr_advance_due(state_path, "v1", now)
-    assert advance_nsr_after_upload(state_path, "v1", "246", now)
-
-    data = json.loads(state_path.read_text(encoding="utf-8"))
-    assert "next_date" not in data
-    assert data["next_advance_at_v1"] == (now + timedelta(days=7)).isoformat()
+    with pytest.raises(StateIntegrityError, match="inválido"):
+        is_audit_due(state_path, "v1", FRIDAY)
 
 
-def test_existing_v2_cursor_without_window_is_blocked_independently_of_v1(tmp_path):
+def test_invalid_audit_timestamp_is_rejected_without_overwriting_state(tmp_path):
     state_path = tmp_path / "state.json"
-    now = datetime(2026, 10, 13, 15, tzinfo=timezone.utc)
-    state_path.write_text(
-        json.dumps(
-            {
-                "last_nsr_v1": "100",
-                "next_advance_at_v1": (now + timedelta(days=3)).isoformat(),
-                "last_nsr_v2": "200",
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    assert not is_nsr_advance_due(state_path, "v1", now)
-    with pytest.raises(StateIntegrityError, match="upload bloqueado"):
-        is_nsr_advance_due(state_path, "v2", now)
-    with pytest.raises(StateIntegrityError, match="upload bloqueado"):
-        advance_nsr_after_upload(state_path, "v2", "346", now)
-
-    data = json.loads(state_path.read_text(encoding="utf-8"))
-    assert data["last_nsr_v1"] == "100"
-    assert data["last_nsr_v2"] == "200"
-    assert "next_advance_at_v2" not in data
-
-
-def test_v2_advances_its_cursor_without_touching_v1_or_legacy_key(tmp_path):
-    state_path = tmp_path / "state.json"
-    now = datetime(2026, 10, 13, 15, tzinfo=timezone.utc)
-    state_path.write_text(
-        json.dumps(
-            {
-                "last_nsr_v1": "100",
-                "last_nsr_v2": "200",
-                "next_date": "2026-10-01",
-                "next_advance_at_v2": (now - timedelta(seconds=1)).isoformat(),
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    assert advance_nsr_after_upload(state_path, "v2", "346", now)
-
-    data = json.loads(state_path.read_text(encoding="utf-8"))
-    assert data["last_nsr_v1"] == "100"
-    assert data["last_nsr_v2"] == "000000346"
-    assert data["next_date"] == "2026-10-01"
-
-
-def test_naive_datetime_schedule_uses_local_timezone(tmp_path):
-    state_path = tmp_path / "state.json"
-    state_path.write_text(
-        json.dumps({"next_advance_at_v1": "2026-10-13T15:00:00"}), encoding="utf-8"
-    )
-    now = datetime(2026, 10, 13, 15)
-
-    assert is_nsr_advance_due(state_path, "v1", now)
-
-
-def test_invalid_next_advance_at_does_not_overwrite_state(tmp_path):
-    state_path = tmp_path / "state.json"
-    original = '{"last_nsr_v1": "100", "next_advance_at_v1": "not-a-date"}'
+    original = '{"next_audit_at_v1": "not-a-date"}'
     state_path.write_text(original, encoding="utf-8")
-    now = datetime(2026, 10, 13, 15, tzinfo=timezone.utc)
 
-    with pytest.raises(StateIntegrityError):
-        advance_nsr_after_upload(state_path, "v1", "246", now)
-
+    with pytest.raises(StateIntegrityError, match="inválida"):
+        record_audit_upload(state_path, "v1", FRIDAY)
     assert state_path.read_text(encoding="utf-8") == original
 
 
-def test_non_text_next_advance_at_is_rejected(tmp_path):
+def test_failed_temporary_write_preserves_existing_state(tmp_path, monkeypatch):
     state_path = tmp_path / "state.json"
-    state_path.write_text('{"next_advance_at_v1": 123}', encoding="utf-8")
-
-    with pytest.raises(StateIntegrityError):
-        is_nsr_advance_due(state_path, "v1")
-
-
-def test_failed_temporary_file_creation_preserves_existing_state(tmp_path, monkeypatch):
-    state_path = tmp_path / "state.json"
-    state_path.write_text('{"last_nsr_v1": "100"}', encoding="utf-8")
+    original = '{"next_audit_at_v1": "2026-10-23T09:00:00-03:00"}'
+    state_path.write_text(original, encoding="utf-8")
 
     def fail_temporary_file(**kwargs):
         raise OSError("disk unavailable")
 
     monkeypatch.setattr("state_store.tempfile.NamedTemporaryFile", fail_temporary_file)
     with pytest.raises(OSError, match="disk unavailable"):
-        save_nsr(state_path, "v1", "200")
+        record_audit_upload(state_path, "v1", FRIDAY)
+    assert state_path.read_text(encoding="utf-8") == original
 
-    assert state_path.read_text(encoding="utf-8") == '{"last_nsr_v1": "100"}'
+
+def test_unknown_version_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="desconhecida"):
+        is_audit_due(tmp_path / "state.json", "v3", FRIDAY)

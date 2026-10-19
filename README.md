@@ -4,14 +4,15 @@
 [![Playwright](https://img.shields.io/badge/Playwright-Automation-green.svg)](https://playwright.dev/python/)
 [![Status](https://img.shields.io/badge/Status-In%20Development-yellow.svg)]()
 
-Automated Python service designed to extract **AFD (Arquivo Fonte de Dados)** files from Henry Electronic Time Clocks (Super Fácil RO2 / Prisma Super Fácil R2) via Playwright web automation, featuring dynamic NSR (Sequential Number of Record) state tracking and automated cloud/PHP backend synchronization.
+Automated Python service that extracts **AFD (Arquivo Fonte de Dados)** files from Henry electronic time clocks (Super Fácil RO2 / Prisma Super Fácil R2) through Playwright and uploads them to the central panel.
 
 ---
 
 ## 🚀 Key Features
 
 - **Resilient Web Automation:** Uses Playwright to interact with Henry's web panel, handling authentication, sessions, and precise element selectors.
-- **Dynamic NSR State Management (`estado_ponto.json`):** Automatically calculates batch ranges per execution cycle, ensuring continuous data collection without gaps or overlaps.
+- **Weekly date/time collection:** Each Friday, downloads records from Monday at 00:00 through the current time. NSRs remain part of the AFD records but are not used as collection cursors.
+- **Audit schedule (`estado_ponto.json`):** Keeps an independent next permitted audit time for each unit and only collects/uploads on Fridays after that time.
 - **Secure Configuration:** Isolates sensitive credentials and device IPs using environment variables (`.env`).
 - **Structured Storage:** Automatically saves extracted AFD files into a dedicated target directory (`afd_downloads/`).
 - **Backend Integration:** Designed to seamlessly feed extracted data into a PHP backend server and cloud infrastructure.
@@ -63,33 +64,26 @@ copy .env.example .env
 
 ### 5. Initialize state file
 
-Ensure `estado_ponto.json` exists in the root directory with your initial NSR pointer:
+Ensure `estado_ponto.json` exists in the root directory with the next audit time for each unit:
 
 ```json
 {
-  "last_nsr_v1": "000045076",
-  "last_nsr_v2": "000001153",
-  "next_advance_at_v1": "2000-01-01T00:00:00-03:00",
-  "next_advance_at_v2": "2000-01-01T00:00:00-03:00"
+  "next_audit_at_v1": "2000-01-01T00:00:00-03:00",
+  "next_audit_at_v2": "2000-01-01T00:00:00-03:00"
 }
 ```
 
-Each clock has an independent weekly window. Before the due time, the pipeline
-skips both extraction and upload, preserving any manual changes made on the
-server after the prior upload. At or after the due time, it downloads and uploads
-the current 146-NSR block; after the upload automation returns without error, the
-cursor advances by 146 and the next window is scheduled seven days from that run.
-A late run remains eligible. If a clock has no window timestamp, its first cycle
-is eligible only when it has no saved cursor. An existing cursor without a
-window timestamp blocks extraction and upload until the timestamp is configured,
-so a missing schedule cannot overwrite manual server changes. For an existing
-installation, set each timestamp to the last successful upload plus seven days.
-The legacy `next_date` field is still read as the V1 due date and removed when
-the V1 window is next advanced.
+V1 and V2 have independent schedules. Collection and upload are skipped on every
+day except Friday and until the saved audit time is due. A due Friday downloads
+Monday 00:00 through the current date and time, uploads the AFD, then schedules
+the next audit seven days later. A missing state file makes the first Friday
+eligible. The old `next_advance_at_v1/v2` and V1 `next_date` schedule keys are
+read during migration; the old NSR cursor fields are discarded when an upload
+is recorded. No NSR cursor is required for the new date/time filters.
 
-A missing state file starts from the configured defaults; malformed JSON or a
-nonnumeric cursor stops collection so the automation cannot silently reset to an
-earlier NSR. The legacy `ultimo_nsr` field is still read as the V1 cursor.
+Date/time filters use `lblDataI` and `lblDataF` on both clocks. The V1 panel
+uses the `communication` filter view and download action `subCompD(5, 8, 2)`;
+the V2 panel uses `menuItem2` and `downloadData(1,32,2)`.
 
 ---
 
@@ -141,7 +135,7 @@ end-to-end coverage.
 ├── .gitignore             # Excludes venv, .env, state files, and downloads
 ├── config.py              # Configuration loader and environment variables bindings
 ├── state_store.py         # Validated, atomic JSON state persistence for both clocks
-├── estado_ponto.json      # Dynamic state tracker for the last processed NSR
+├── estado_ponto.json      # Independent next audit times for V1 and V2
 ├── extract_afc_v1.py      # Playwright automation script for Unit V1 (Local)
 ├── extract_afc_v2.py      # Playwright automation script for Unit V2 (External via Tailscale)
 ├── cloud.py               # Synchronization and automated web server upload module
