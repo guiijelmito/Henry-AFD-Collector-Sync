@@ -1,6 +1,27 @@
 """Verifica a janela de execução e a ordem de upload no pipeline."""
 
-import main
+from ponto_eletronico import main as cli
+from ponto_eletronico import pipeline as main
+from ponto_eletronico.extractors.henry_v2 import TailnetConnectionError
+
+
+def test_cli_defaults_to_devtools_menu(monkeypatch):
+    import sys
+    import types
+
+    monkeypatch.setitem(
+        sys.modules, "ponto_eletronico.devtools", types.SimpleNamespace(main=lambda: 7)
+    )
+    monkeypatch.setattr(cli, "setup_logging", lambda: None)
+
+    assert cli.cli_main([]) == 7
+
+
+def test_cli_scheduled_option_uses_weekly_pipeline(monkeypatch):
+    monkeypatch.setattr(cli, "pipeline_principal", lambda: {"V1": "OK", "V2": "FORA_DA_JANELA"})
+    monkeypatch.setattr(cli, "setup_logging", lambda: None)
+
+    assert cli.cli_main(["--scheduled"]) == 0
 
 
 def test_cursor_registration_happens_after_upload_returns(tmp_path, monkeypatch):
@@ -62,3 +83,13 @@ def test_closed_window_skips_extraction_upload_and_cursor_registration(monkeypat
     )
 
     assert status == "FORA_DA_JANELA"
+
+
+def test_tailnet_connection_failure_has_specific_status_and_message(caplog):
+    def connection_failure():
+        raise TailnetConnectionError("Não foi possível alcançar o painel V2")
+
+    status = main._processar_unidade("V2", "2/2", lambda: True, connection_failure, lambda: None)
+
+    assert status == "FALHA_TAILSCALE"
+    assert "Falha de conexão Tailscale" in caplog.text

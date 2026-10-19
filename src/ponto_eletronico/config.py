@@ -12,13 +12,15 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .path_utils import configured_path
+
 load_dotenv()
 
-BASE_DIR = Path(__file__).resolve().parent
-DIRETORIO_BASE = Path(os.getenv("DIRETORIO_BASE") or BASE_DIR).expanduser()
-DIRETORIO_DOWNLOADS = Path(
-    os.getenv("DIRETORIO_DOWNLOADS") or DIRETORIO_BASE / "afd_downloads"
-).expanduser()
+BASE_DIR = Path(__file__).resolve().parents[2]
+DIRETORIO_BASE = configured_path(os.getenv("DIRETORIO_BASE"), BASE_DIR)
+DIRETORIO_DOWNLOADS = configured_path(
+    os.getenv("DIRETORIO_DOWNLOADS"), DIRETORIO_BASE / "afd_downloads"
+)
 
 
 def _url_do_relogio(nome_ip: str) -> str | None:

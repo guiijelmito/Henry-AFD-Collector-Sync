@@ -17,10 +17,16 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import ClassVar
 
-env_base = os.getenv("DIRETORIO_BASE")
-DIRETORIO_BASE = Path(env_base) if env_base else Path(__file__).resolve().parent
+from dotenv import load_dotenv
 
-LOG_DIR = Path(os.getenv("LOG_DIR", DIRETORIO_BASE / "logs"))
+from .path_utils import configured_path
+
+load_dotenv()
+
+env_base = os.getenv("DIRETORIO_BASE")
+DIRETORIO_BASE = configured_path(env_base, Path(__file__).resolve().parents[2])
+
+LOG_DIR = configured_path(os.getenv("LOG_DIR"), DIRETORIO_BASE / "logs")
 LOG_FILE = LOG_DIR / "afd_collector.log"
 SCREENSHOT_DIR = LOG_DIR / "screenshots"
 

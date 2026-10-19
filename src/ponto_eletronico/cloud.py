@@ -12,8 +12,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-from config import HEADLESS_MODE, SLOW_MO_MS
-from logging_config import capturar_screenshot
+from .config import HEADLESS_MODE, SLOW_MO_MS
+from .logging_config import capturar_screenshot
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,13 @@ SERVER_USER = os.getenv("SERVER_USER")
 SERVER_PASSWORD = os.getenv("SERVER_PASSWORD")
 
 
-def enviar_afd_para_servidor(caminho_arquivo_afd: str, unidade: str = "V1"):
+def enviar_afd_para_servidor(
+    caminho_arquivo_afd: str,
+    unidade: str = "V1",
+    *,
+    headless: bool | None = None,
+    slow_mo_ms: int | None = None,
+):
     """Autentica no painel e submete o AFD associado à unidade informada.
 
     Falhas de configuração, navegação ou envio são propagadas ao pipeline
@@ -62,13 +68,15 @@ def enviar_afd_para_servidor(caminho_arquivo_afd: str, unidade: str = "V1"):
     with sync_playwright() as p:
         browser = None
         page = None
+        modo_headless = HEADLESS_MODE if headless is None else headless
+        atraso_ms = SLOW_MO_MS if slow_mo_ms is None else slow_mo_ms
         try:
             logger.debug(
                 "Parâmetros do navegador | headless=%s slow_mo=%sms",
-                HEADLESS_MODE,
-                SLOW_MO_MS,
+                modo_headless,
+                atraso_ms,
             )
-            browser = p.chromium.launch(headless=HEADLESS_MODE, slow_mo=SLOW_MO_MS)
+            browser = p.chromium.launch(headless=modo_headless, slow_mo=atraso_ms)
             page = browser.new_page()
             logger.info("Acessando a página de autenticação: %s", SERVER_URL)
             page.goto(SERVER_URL)
@@ -97,9 +105,8 @@ def enviar_afd_para_servidor(caminho_arquivo_afd: str, unidade: str = "V1"):
 
             logger.info("Enviando dados ao servidor")
             page.locator("button:has-text('Enviar')").click()
+            page.wait_for_load_state("networkidle")
 
-            # O painel não expõe um seletor de confirmação conhecido neste projeto.
-            page.wait_for_timeout(3000)
             logger.info(
                 "Solicitação de upload da unidade %s enviada; painel sem confirmação explícita (%.1fs)",
                 unidade,
