@@ -23,4 +23,4 @@ COPY src/ ./src/
 
 RUN mkdir --parents /data /tmp/afd_downloads
 
-CMD ["python", "-m", "ponto_eletronico.main", "--scheduled"]
+CMD ["python", "-m", "ponto_eletronico.pipeline"]
