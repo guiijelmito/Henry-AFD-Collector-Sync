@@ -11,6 +11,7 @@ from playwright.sync_api import sync_playwright
 
 from ..afd_validation import preencher_intervalo_data_hora, validar_afd_v2_no_intervalo
 from ..config import (
+    DIRETORIO_BASE,
     DIRETORIO_DOWNLOADS,
     HEADLESS_MODE,
     SENHA_V2,
@@ -29,9 +30,8 @@ class TailnetConnectionError(ConnectionError):
     """Indica que o painel V2 não pôde ser alcançado pela rede Tailscale."""
 
 
-# Caminho do estado de auditoria semanal da unidade
-BASE_DIR = str(Path(__file__).resolve().parents[3])
-ARQUIVO_ESTADO = os.path.join(BASE_DIR, "estado_ponto.json")
+# O estado pode ser montado em volume persistente no Docker.
+ARQUIVO_ESTADO = str(Path(DIRETORIO_BASE) / "estado_ponto.json")
 
 
 def janela_semanal_vencida():

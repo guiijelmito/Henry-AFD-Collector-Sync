@@ -85,6 +85,38 @@ Date/time filters use `lblDataI` and `lblDataF` on both clocks. The V1 panel
 uses the `communication` filter view and download action `subCompD(5, 8, 2)`;
 the V2 panel uses `menuItem2` and `downloadData(1,32,2)`.
 
+## Docker (DigitalOcean Droplet)
+
+The image packages the application, Python dependencies, and the matching
+Playwright Chromium runtime. Compose runs the scheduled pipeline as a one-shot
+container; the Droplet's host scheduler can start it on Fridays. The container
+uses the host network so it can use routes configured on the Droplet, including
+the V2 Tailscale route. Both clock addresses must be reachable from the host.
+
+Create a runtime environment file and persistent data directory on the host:
+
+```bash
+cp .env.example .env
+mkdir -p data
+```
+
+Fill `.env` with real credentials and reachable clock addresses, then build and
+run the scheduled pipeline:
+
+```bash
+docker compose build
+docker compose run --rm afd-collector
+```
+
+The `data/` directory is mounted at `/data` and retains `estado_ponto.json` and
+logs between runs. Downloaded AFDs are written under `/tmp` inside the container;
+with `--rm`, the container and those temporary files are removed after the run.
+The `.env` file is supplied at runtime and excluded from the image build context.
+Run this Compose configuration on Linux for the Droplet deployment because it
+uses host networking. Install and connect Tailscale on the Droplet host before
+expecting V2 to be reachable. This command runs the production schedule gate;
+outside an eligible Friday, it exits without collecting or uploading.
+
 ---
 
 ## Usage

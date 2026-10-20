@@ -10,6 +10,7 @@ from playwright.sync_api import sync_playwright
 
 from ..afd_validation import preencher_intervalo_data_hora, validar_afd_v1_no_intervalo
 from ..config import (
+    DIRETORIO_BASE,
     DIRETORIO_DOWNLOADS,
     HEADLESS_MODE,
     SENHA_V1,
@@ -23,9 +24,8 @@ from ..state_store import audit_date_range, is_audit_due, record_audit_upload
 
 logger = logging.getLogger(__name__)
 
-# Caminho do estado de auditoria semanal da unidade
-BASE_DIR = str(Path(__file__).resolve().parents[3])
-ARQUIVO_ESTADO = os.path.join(BASE_DIR, "estado_ponto.json")
+# O estado pode ser montado em volume persistente no Docker.
+ARQUIVO_ESTADO = str(Path(DIRETORIO_BASE) / "estado_ponto.json")
 
 
 def janela_semanal_vencida():

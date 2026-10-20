@@ -21,6 +21,7 @@ secrets/
 # Ignora os arquivos de estado locais e os arquivos AFD baixados para não sujar o repositório
 estado_ponto.json
 afd_downloads/
+data/
 
 # --- LOGS E ARQUIVOS TEMPORÁRIOS DO PLAYWRIGHT / SISTEMA ---
 *.log
