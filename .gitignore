@@ -23,3 +23,6 @@ htmlcov/
 playwright-report/
 test-results/
 log.txt
+
+# graphify
+graphify-out/cache/

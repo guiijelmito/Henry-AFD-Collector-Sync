@@ -1,0 +1,116 @@
+{
+  ".claude/settings.json": {
+    "mtime": 1793017594.6598744,
+    "seen": 1793017607.2313178,
+    "ast_hash": "3b541b9935fcf0831355da956f897645",
+    "semantic_hash": ""
+  },
+  "config/estado_ponto.example.json": {
+    "mtime": 1793016982.8580573,
+    "seen": 1793017607.2313268,
+    "ast_hash": "2c6c133011d35612ec59f01533732c6f",
+    "semantic_hash": ""
+  },
+  "main.py": {
+    "mtime": 1793016982.8580573,
+    "seen": 1793017607.2313313,
+    "ast_hash": "fdc6317a8ae03cd80e2034f741e07697",
+    "semantic_hash": ""
+  },
+  "src/ponto_eletronico/__init__.py": {
+    "mtime": 1793016982.8650224,
+    "seen": 1793017607.231334,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "src/ponto_eletronico/cloud.py": {
+    "mtime": 1793016982.865065,
+    "seen": 1793017607.2313364,
+    "ast_hash": "039aa978534c71d0d21e6bdb4dd24ddf",
+    "semantic_hash": ""
+  },
+  "src/ponto_eletronico/config.py": {
+    "mtime": 1793016982.865065,
+    "seen": 1793017607.2313385,
+    "ast_hash": "30ab4d4f8e2e17abd7a813ef2722e20f",
+    "semantic_hash": ""
+  },
+  "src/ponto_eletronico/extractors/__init__.py": {
+    "mtime": 1793016982.865065,
+    "seen": 1793017607.2313411,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "src/ponto_eletronico/extractors/henry_v1.py": {
+    "mtime": 1793016982.865336,
+    "seen": 1793017607.231343,
+    "ast_hash": "afd2f058a18cf35e7da1192c142477cb",
+    "semantic_hash": ""
+  },
+  "src/ponto_eletronico/extractors/henry_v2.py": {
+    "mtime": 1793016982.865336,
+    "seen": 1793017607.231345,
+    "ast_hash": "f13a9337fb8de594973044e34045427f",
+    "semantic_hash": ""
+  },
+  "src/ponto_eletronico/logging_config.py": {
+    "mtime": 1793016982.865336,
+    "seen": 1793017607.2313468,
+    "ast_hash": "023bb248552f0ca1ddc7f5b1294ef777",
+    "semantic_hash": ""
+  },
+  "src/ponto_eletronico/path_utils.py": {
+    "mtime": 1793016982.865336,
+    "seen": 1793017607.2313488,
+    "ast_hash": "12da2b731e26fec396b82c6ea2c4248a",
+    "semantic_hash": ""
+  },
+  "src/ponto_eletronico/pipeline.py": {
+    "mtime": 1793016982.865336,
+    "seen": 1793017607.2313511,
+    "ast_hash": "4b43ed54da94fc7ebcee4a77b096083f",
+    "semantic_hash": ""
+  },
+  "tests/unit/test_package_layout.py": {
+    "mtime": 1793016982.8661199,
+    "seen": 1793017607.231353,
+    "ast_hash": "e49565ea06bb92bad9a1a25bcf4ea13a",
+    "semantic_hash": ""
+  },
+  ".claude/CLAUDE.md": {
+    "mtime": 1793017594.6593556,
+    "seen": 1793017607.231355,
+    "ast_hash": "9b31786b637be3c13978bec4c2330752",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1793017594.6596727,
+    "seen": 1793017607.2313569,
+    "ast_hash": "67d88e9d0760c3ba54c75dfd9551c1c5",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1793016982.8580573,
+    "seen": 1793017607.2313633,
+    "ast_hash": "346f4f878c225943bedc452bf279a130",
+    "semantic_hash": ""
+  },
+  "requirements.txt": {
+    "mtime": 1793016982.8580573,
+    "seen": 1793017607.231367,
+    "ast_hash": "7b26f959411719d14bf31c554b40842a",
+    "semantic_hash": ""
+  },
+  "tests/integration/README.md": {
+    "mtime": 1793016982.8661199,
+    "seen": 1793017607.231369,
+    "ast_hash": "796957bd2b874b1a372df5d6afd946ba",
+    "semantic_hash": ""
+  },
+  "docs/FERRAMENTAS_IA.md": {
+    "mtime": 1793017668.526098,
+    "seen": 1793017678.925324,
+    "ast_hash": "92833f8e158e300dec0567644386692f",
+    "semantic_hash": ""
+  }
+}
