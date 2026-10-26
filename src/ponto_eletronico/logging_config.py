@@ -17,6 +17,12 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import ClassVar
 
+from dotenv import load_dotenv
+
+# O pipeline importa este módulo antes do config.py; sem isto, DIRETORIO_BASE,
+# LOG_DIR e LOG_LEVEL definidos no .env seriam ignorados.
+load_dotenv()
+
 env_base = os.getenv("DIRETORIO_BASE")
 # Sem DIRETORIO_BASE, os logs ficam na raiz do projeto (mesma regra do config.py)
 DIRETORIO_BASE = Path(env_base) if env_base else Path(__file__).resolve().parents[2]
