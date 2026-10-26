@@ -11,7 +11,7 @@ Automated Python service that extracts **AFD (Arquivo Fonte de Dados)** files fr
 ## 🚀 Key Features
 
 - **Resilient Web Automation:** Uses Playwright to interact with Henry's web panel, handling authentication, sessions, and precise element selectors.
-- **Weekly date/time collection:** Downloads records from where the last upload stopped (Monday 00:00 the first time) through the current time. NSRs remain part of the AFD records but are not used as collection cursors.
+- **Weekly date/time collection:** Downloads records from where the last upload stopped (the last 7 days the first time) through the current time. NSRs remain part of the AFD records but are not used as collection cursors.
 - **Audit schedule (`estado_ponto.json`):** Keeps, per unit, the next permitted upload time (e.g. Friday 23:59) and how far the last upload went.
 - **Secure Configuration:** Isolates sensitive credentials and device IPs using environment variables (`.env`).
 - **Structured Storage:** Automatically saves extracted AFD files into a dedicated target directory (`afd_downloads/`).
@@ -75,7 +75,7 @@ the last upload went:
 ```
 
 A unit is collected and uploaded at or after its `next_audit_at`, on any day. The first
-collection covers Monday 00:00 through now; each later one starts at the saved
+collection covers the last 7 days; each later one starts at the saved
 `collected_until_v1/v2`, so a late or failed run never leaves marks behind. After a
 successful upload, `collected_until` moves to the end of the collected period and
 `next_audit_at` moves forward in 7-day steps, keeping the configured weekday and time.

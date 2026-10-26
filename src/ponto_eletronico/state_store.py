@@ -96,7 +96,7 @@ def audit_date_range(
     version: str,
     now: datetime | None = None,
 ) -> tuple[str, str]:
-    """Período a coletar: de onde a última coleta parou (ou segunda 00:00) até agora.
+    """Período a coletar: de onde a última coleta parou (ou 7 dias atrás) até agora.
 
     Começar onde a anterior parou garante que nenhuma marcação fique de fora,
     mesmo que uma coleta atrase ou falhe por alguns dias.
@@ -105,9 +105,7 @@ def audit_date_range(
     current_time = _current_time(now)
     collected_until = load_state_data(path).get(f"collected_until_{version}")
     if collected_until is None:
-        start = (current_time - timedelta(days=current_time.weekday())).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        start = current_time - timedelta(days=7)
     else:
         start = _parse_moment(collected_until, current_time.tzinfo)
     return start.strftime(DATE_FORMAT), current_time.strftime(DATE_FORMAT)

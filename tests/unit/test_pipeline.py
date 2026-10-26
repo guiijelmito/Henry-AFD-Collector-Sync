@@ -50,7 +50,7 @@ def test_collects_monday_to_now_then_records_state_after_upload(estado, afd, mon
     resultado = processar("V1", extrator, estado)
 
     assert resultado.status == "OK"
-    assert eventos == [("19/10/2026 00:00", "23/10/2026 23:59"), {}]  # estado vazio no upload
+    assert eventos == [("16/10/2026 23:59", "23/10/2026 23:59"), {}]  # estado vazio no upload
     assert load_state_data(estado) == {
         "collected_until_v1": "2026-10-23T23:59-03:00",
         "next_audit_at_v1": "2026-10-30T23:59-03:00",

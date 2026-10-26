@@ -19,9 +19,9 @@ def write(path, data):
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def test_first_collection_goes_from_monday_to_now_including_friday(tmp_path):
+def test_first_collection_covers_the_last_seven_days(tmp_path):
     assert audit_date_range(tmp_path / "missing.json", "v1", FRIDAY) == (
-        "19/10/2026 00:00",
+        "16/10/2026 23:59",
         "23/10/2026 23:59",
     )
 
