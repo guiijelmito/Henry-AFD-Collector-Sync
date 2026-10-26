@@ -1,0 +1,19 @@
+services:
+  afd-collector:
+    build:
+      context: .
+    image: henry-afd-collector:local
+    env_file:
+      - .env
+    environment:
+      DIRETORIO_BASE: /data
+      DIRETORIO_DOWNLOADS: /tmp/afd_downloads
+      LOG_DIR: /data/logs
+      HEADLESS_MODE: "true"
+      SLOW_MO_MS: "0"
+      TZ: America/Sao_Paulo
+    network_mode: host
+    init: true
+    restart: "no"
+    volumes:
+      - ./data:/data

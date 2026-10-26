@@ -35,7 +35,8 @@ def _telegram(metodo, campos, arquivo=None):
     pedido = urllib.request.Request(
         url, data=corpo, headers={"Content-Type": f"multipart/form-data; boundary={fronteira}"}
     )
-    with urllib.request.urlopen(pedido, timeout=30) as resposta:
+    # URL fixa https da API do Telegram
+    with urllib.request.urlopen(pedido, timeout=30) as resposta:  # noqa: S310
         if not json.load(resposta).get("ok"):
             raise RuntimeError(f"Telegram recusou {metodo}")
 

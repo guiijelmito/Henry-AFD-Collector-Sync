@@ -1,10 +1,10 @@
 ﻿<#
 Registra a coleta de ponto no Agendador de Tarefas do Windows.
 
-Roda TODO DIA às 00:00. O próprio script só coleta quando a data liberada
-(next_date) chegou, então nos outros dias ele termina em segundos sem abrir o navegador.
-Com isso, se o PC estiver desligado na sexta, a coleta acontece sozinha no dia seguinte,
-e uma coleta que falhou é tentada de novo na noite seguinte.
+Roda toda SEXTA às 00:00 e repete de hora em hora até o fim do dia.
+O próprio script só coleta se a auditoria da semana ainda não foi enviada; depois do
+envio, as repetições terminam em segundos sem abrir o navegador. Assim, uma falha
+(relógio fora do ar, PC desligado à meia-noite) é tentada de novo ao longo da sexta.
 
 Uso (PowerShell como administrador, na pasta do projeto):
     powershell -ExecutionPolicy Bypass -File scripts\agendar_tarefa.ps1
@@ -24,15 +24,16 @@ $acao = New-ScheduledTaskAction -Execute "cmd.exe" `
     -Argument "/c `"`"$raiz\executar.bat`" >> `"$logs\agendador.log`" 2>&1`"" `
     -WorkingDirectory $raiz
 
-$gatilho = New-ScheduledTaskTrigger -Daily -At $Horario
+$gatilho = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Friday -At $Horario
+$gatilho.Repetition = (New-ScheduledTaskTrigger -Once -At $Horario `
+    -RepetitionInterval (New-TimeSpan -Hours 1) `
+    -RepetitionDuration (New-TimeSpan -Hours 23)).Repetition
 
 $config = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -WakeToRun `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
-    -RestartCount 2 `
-    -RestartInterval (New-TimeSpan -Minutes 30) `
     -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
     -MultipleInstances IgnoreNew
 
@@ -43,7 +44,7 @@ $principal = New-ScheduledTaskPrincipal -UserId $usuario -LogonType S4U -RunLeve
 Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho `
     -Settings $config -Principal $principal -Force | Out-Null
 
-Write-Host "Tarefa '$NomeTarefa' registrada: todo dia às $Horario, como $usuario."
+Write-Host "Tarefa '$NomeTarefa' registrada: toda sexta a partir de $Horario, de hora em hora, como $usuario."
 Write-Host "Testar agora:  Start-ScheduledTask -TaskName '$NomeTarefa'"
 Write-Host "Ver resultado: Get-ScheduledTaskInfo -TaskName '$NomeTarefa'  (LastTaskResult 0 = sucesso)"
 Write-Host "Importante: deixe HEADLESS_MODE=true no .env, pois a tarefa roda sem tela."
