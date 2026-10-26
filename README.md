@@ -46,7 +46,7 @@ source venv/bin/activate
 ### 3. Install dependencies
 
 ```bash
-pip install playwright python-dotenv
+pip install -r requirements.txt
 playwright install chromium
 ```
 
@@ -64,17 +64,28 @@ SENHA_V1=replace_me
 IP_V2=192.0.2.20
 USUARIO_V2=your_clock_user
 SENHA_V2=replace_me
+HEADLESS_MODE=true
 ```
+
+See `.env.example` for the optional settings (batch size, retries, Telegram and e-mail alerts).
 
 ### 5. Initialize state file
 
-Ensure `estado_ponto.json` exists in the root directory with your initial NSR pointer:
+`estado_ponto.json` in the root directory keeps, per unit, the last NSR already sent and the
+date from which the next collection is allowed:
 
 ```json
 {
-  "ultimo_nsr": "000044930"
+  "last_nsr_v1": "000045076",
+  "last_nsr_v2": "000001153",
+  "next_date_v1": "2026-10-30",
+  "next_date_v2": "2026-10-30"
 }
 ```
+
+A unit is collected on or after its `next_date`. After a successful upload the NSR moves to the
+last record actually downloaded and `next_date` moves forward in 7-day steps, keeping the weekday.
+The older shared `next_date` key is still read as the default for both units.
 
 ---
 
@@ -83,8 +94,24 @@ Ensure `estado_ponto.json` exists in the root directory with your initial NSR po
 Run the main automation script:
 
 ```bash
-python main.py
+python main.py            # collects only the units whose next_date has arrived
+python main.py --forcar   # collects now, ignoring next_date
 ```
+
+Each run that collects something writes a report to `logs/relatorios/` (JSON and PDF) and,
+if configured, sends the summary and the PDF via Telegram (or e-mail as a fallback).
+The exit code is `1` when any unit failed, so the Windows Task Scheduler shows the failure.
+
+### Scheduling (Windows)
+
+Run once, in an administrator PowerShell, from the project folder:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\agendar_tarefa.ps1
+```
+
+The task runs every day at 00:00. On days before `next_date` it exits in seconds without opening
+the browser, so a Friday missed because the PC was off, or a failed run, is retried the next night.
 
 ---
 
@@ -93,14 +120,18 @@ python main.py
 ```
 ├── src/ponto_eletronico/  # Aplicação e regras de negócio
 │   ├── config.py
-│   ├── pipeline.py
+│   ├── pipeline.py        # Coleta por unidade, tentativas e código de saída
+│   ├── estado.py          # estado_ponto.json: último NSR e janela de coleta
+│   ├── afd.py             # Leitura dos NSRs do arquivo AFD
+│   ├── relatorio.py       # Relatório JSON/PDF de cada execução
+│   ├── alertas.py         # Telegram e e-mail
 │   ├── cloud.py
 │   ├── logging_config.py
 │   ├── path_utils.py
 │   └── extractors/        # Automações Henry V1 e V2
 ├── config/                # Exemplos de configuração
 ├── scripts/               # Execução e manutenção
-├── tests/unit/            # Teste de importação sem acessar relógios
+├── tests/unit/            # Testes sem acessar relógios nem servidor
 ├── tests/integration/     # Testes que dependem da infraestrutura
 ├── main.py                # Atalho compatível para iniciar o pipeline
 ├── executar.bat           # Atalho para o agendador do Windows
