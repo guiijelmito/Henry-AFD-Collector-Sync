@@ -19,12 +19,9 @@ from . import config, relatorio  # noqa: E402
 from .alertas import enviar_alerta  # noqa: E402
 from .cloud import enviar_afd_para_servidor  # noqa: E402
 from .extractors.henry_v1 import automatizar_download_afd_v1  # noqa: E402
-from .extractors.henry_v1 import janela_semanal_vencida as janela_v1_vencida  # noqa: E402
-from .extractors.henry_v1 import registrar_upload_enviado as registrar_upload_v1  # noqa: E402
 from .extractors.henry_v2 import TailnetConnectionError, automatizar_download_afd_v2  # noqa: E402
-from .extractors.henry_v2 import janela_semanal_vencida as janela_v2_vencida  # noqa: E402
-from .extractors.henry_v2 import registrar_upload_enviado as registrar_upload_v2  # noqa: E402
 from .relatorio import FALHA, FALHA_TAILSCALE, FORA_DA_JANELA  # noqa: E402
+from .state_store import audit_date_range, is_audit_due, record_audit_upload  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -51,32 +48,33 @@ def _com_tentativas(descricao, funcao):
             _dormir(espera)
 
 
-def _processar_unidade(
-    unidade,
-    etapa,
-    janela_vencida,
-    funcao_extracao,
-    registrar_upload,
-):
+def _processar_unidade(unidade, etapa, funcao_extracao, agora=None, arquivo_estado=None):
     """Executa extração e upload e devolve o resultado da unidade para o relatório.
 
     A exceção da unidade é registrada e convertida em falha para permitir
     que a outra unidade também seja processada.
     """
     logger.info("[%s] Processando unidade %s", etapa, unidade)
+    versao = unidade.lower()
+    arquivo_estado = arquivo_estado or config.ARQUIVO_ESTADO
+    agora = agora or datetime.now().astimezone()
     resultado = relatorio.ResultadoUnidade(unidade)
     inicio = time.perf_counter()
     try:
-        if not janela_vencida():
+        resultado.etapa = "estado"
+        if not is_audit_due(arquivo_estado, versao, agora):
             logger.info(
-                "Janela semanal da unidade %s ainda não venceu; extração e upload adiados",
-                unidade,
+                "Upload da unidade %s ainda não liberado (next_audit_at no futuro)", unidade
             )
             resultado.status = FORA_DA_JANELA
             return resultado
 
+        data_inicial, data_final = audit_date_range(arquivo_estado, versao, agora)
+        resultado.periodo = f"{data_inicial} a {data_final}"
         resultado.etapa = "download"
-        caminho_afd = _com_tentativas(f"Download {unidade}", funcao_extracao)
+        caminho_afd = _com_tentativas(
+            f"Download {unidade}", lambda: funcao_extracao(data_inicial, data_final)
+        )
         if not caminho_afd or not os.path.exists(caminho_afd):
             raise relatorio.ArquivoInvalido(f"O download da {unidade} não gerou arquivo.")
         resultado.arquivo = caminho_afd
@@ -87,9 +85,9 @@ def _processar_unidade(
         )
         resultado.enviado = True
 
-        resultado.etapa = "agendamento"
-        registrar_upload()
-        resultado.mensagem = "AFD da semana baixado e enviado ao painel."
+        resultado.etapa = "estado"
+        record_audit_upload(arquivo_estado, versao, data_final, agora)
+        resultado.mensagem = "AFD do período baixado e enviado ao painel."
         logger.info(
             "Unidade %s processada e enviada com sucesso em %.1fs",
             unidade,
@@ -121,12 +119,8 @@ def executar():
     logging.getLogger().addHandler(coletor)
     try:
         execucao.unidades = [
-            _processar_unidade(
-                "V1", "1/2", janela_v1_vencida, automatizar_download_afd_v1, registrar_upload_v1
-            ),
-            _processar_unidade(
-                "V2", "2/2", janela_v2_vencida, automatizar_download_afd_v2, registrar_upload_v2
-            ),
+            _processar_unidade("V1", "1/2", automatizar_download_afd_v1),
+            _processar_unidade("V2", "2/2", automatizar_download_afd_v2),
         ]
     finally:
         logging.getLogger().removeHandler(coletor)

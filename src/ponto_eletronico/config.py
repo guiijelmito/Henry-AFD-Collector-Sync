@@ -19,6 +19,8 @@ DIRETORIO_BASE = Path(os.getenv("DIRETORIO_BASE") or BASE_DIR).expanduser()
 DIRETORIO_DOWNLOADS = Path(
     os.getenv("DIRETORIO_DOWNLOADS") or DIRETORIO_BASE / "afd_downloads"
 ).expanduser()
+# O estado pode ser montado em volume persistente no Docker.
+ARQUIVO_ESTADO = DIRETORIO_BASE / "estado_ponto.json"
 
 
 def _url_do_relogio(nome_ip: str) -> str | None:

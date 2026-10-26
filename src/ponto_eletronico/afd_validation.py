@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from playwright.sync_api import Page
@@ -45,7 +45,8 @@ def _validar_marcacoes_no_intervalo(
     intervalo: tuple[str, str],
 ) -> tuple[datetime, datetime, int]:
     inicio = datetime.strptime(intervalo[0], "%d/%m/%Y %H:%M")
-    fim = datetime.strptime(intervalo[1], "%d/%m/%Y %H:%M")
+    # O filtro tem precisão de minuto; a V2 grava segundos (10:15:30 cabe em "10:15")
+    fim = datetime.strptime(intervalo[1], "%d/%m/%Y %H:%M") + timedelta(seconds=59)
     if not marcacoes:
         raise AFDRangeValidationError("O arquivo não contém registros de marcação AFD válidos")
 

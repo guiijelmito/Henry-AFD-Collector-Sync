@@ -194,3 +194,15 @@ def test_validar_afd_v2_rejeita_timestamp_fora_do_intervalo(tmp_path: Path):
             path,
             ("19/10/2026 00:00", "19/10/2026 23:59"),
         )
+
+
+def test_validar_afd_v2_aceita_segundos_dentro_do_ultimo_minuto(tmp_path: Path):
+    path = tmp_path / "v2-last-minute.afd"
+    path.write_text(_registro_marcacao_v2(1, "2026-10-23T23:59:30"), encoding="utf-8")
+
+    _, maior, quantidade = validar_afd_v2_no_intervalo(
+        path,
+        ("19/10/2026 00:00", "23/10/2026 23:59"),
+    )
+    assert maior == datetime(2026, 10, 23, 23, 59, 30)
+    assert quantidade == 1

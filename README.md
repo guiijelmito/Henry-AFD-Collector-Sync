@@ -11,8 +11,8 @@ Automated Python service that extracts **AFD (Arquivo Fonte de Dados)** files fr
 ## 🚀 Key Features
 
 - **Resilient Web Automation:** Uses Playwright to interact with Henry's web panel, handling authentication, sessions, and precise element selectors.
-- **Weekly date/time collection:** Each Friday, downloads records from Monday at 00:00 through the current time. NSRs remain part of the AFD records but are not used as collection cursors.
-- **Audit schedule (`estado_ponto.json`):** Keeps an independent next permitted audit time for each unit and only collects/uploads on Fridays after that time.
+- **Weekly date/time collection:** Downloads records from where the last upload stopped (Monday 00:00 the first time) through the current time. NSRs remain part of the AFD records but are not used as collection cursors.
+- **Audit schedule (`estado_ponto.json`):** Keeps, per unit, the next permitted upload time (e.g. Friday 23:59) and how far the last upload went.
 - **Secure Configuration:** Isolates sensitive credentials and device IPs using environment variables (`.env`).
 - **Structured Storage:** Automatically saves extracted AFD files into a dedicated target directory (`afd_downloads/`).
 - **Backend Integration:** Designed to seamlessly feed extracted data into a PHP backend server and cloud infrastructure.
@@ -64,22 +64,23 @@ copy .env.example .env
 
 ### 5. Initialize state file
 
-Ensure `estado_ponto.json` exists in the root directory with the next audit time for each unit:
+`estado_ponto.json` keeps, per unit, when the next upload is allowed and how far
+the last upload went:
 
 ```json
 {
-  "next_audit_at_v1": "2000-01-01T00:00:00-03:00",
-  "next_audit_at_v2": "2000-01-01T00:00:00-03:00"
+  "next_audit_at_v1": "2026-10-30T23:59:00-03:00",
+  "next_audit_at_v2": "2026-10-30T23:59:00-03:00"
 }
 ```
 
-V1 and V2 have independent schedules. Collection and upload are skipped on every
-day except Friday and until the saved audit time is due. A due Friday downloads
-Monday 00:00 through the current date and time, uploads the AFD, then schedules
-the next audit for the following Friday at 00:00. A missing state file makes the first Friday
-eligible. The old `next_advance_at_v1/v2` and V1 `next_date` schedule keys are
-read during migration; the old NSR cursor fields are discarded when an upload
-is recorded. No NSR cursor is required for the new date/time filters.
+A unit is collected and uploaded at or after its `next_audit_at`, on any day. The first
+collection covers Monday 00:00 through now; each later one starts at the saved
+`collected_until_v1/v2`, so a late or failed run never leaves marks behind. After a
+successful upload, `collected_until` moves to the end of the collected period and
+`next_audit_at` moves forward in 7-day steps, keeping the configured weekday and time.
+A missing state file makes the first run eligible. The old `next_advance_at_v1/v2` and
+V1 `next_date` keys are read during migration.
 
 Date/time filters use `lblDataI` and `lblDataF` on both clocks. The V1 panel
 uses the `communication` filter view and download action `subCompD(5, 8, 2)`;
@@ -89,7 +90,7 @@ the V2 panel uses `menuItem2` and `downloadData(1,32,2)`.
 
 The image packages the application, Python dependencies, and the matching
 Playwright Chromium runtime. Compose runs the scheduled pipeline as a one-shot
-container; the Droplet's host scheduler can start it on Fridays. The container
+container; the Droplet's host scheduler can start it daily. The container
 uses the host network so it can use routes configured on the Droplet, including
 the V2 Tailscale route. Both clock addresses must be reachable from the host.
 
@@ -115,7 +116,7 @@ The `.env` file is supplied at runtime and excluded from the image build context
 Run this Compose configuration on Linux for the Droplet deployment because it
 uses host networking. Install and connect Tailscale on the Droplet host before
 expecting V2 to be reachable. This command runs the production schedule gate;
-outside an eligible Friday, it exits without collecting or uploading.
+before `next_audit_at`, it exits without collecting or uploading.
 
 ---
 
@@ -147,9 +148,9 @@ Run once, in an administrator PowerShell, from the project folder:
 powershell -ExecutionPolicy Bypass -File scripts\agendar_tarefa.ps1
 ```
 
-The task runs every Friday at 00:00 and repeats hourly until the end of the day.
-After a unit's weekly upload is recorded, the next audit is due the following Friday
-at 00:00, so the remaining hourly runs exit in seconds without opening the browser.
+The task runs every day at 23:59. Before `next_audit_at` it exits in seconds without
+opening the browser. If Friday's run fails or the PC is off, the next day's run collects
+from where the last upload stopped.
 
 ## Development checks
 
@@ -195,7 +196,7 @@ end-to-end coverage.
 │   └── logging_config.py  # Console/file logging and screenshots
 ├── scripts/
 │   ├── executar.bat       # Windows wrapper used by the scheduler
-│   └── agendar_tarefa.ps1 # Registers the Friday task in Task Scheduler
+│   └── agendar_tarefa.ps1 # Registers the daily task in Task Scheduler
 ├── tests/unit/            # Tests that run without clocks or panel
 ├── tests/integration/     # Tests that need the real infrastructure
 ├── config/                # Example state file

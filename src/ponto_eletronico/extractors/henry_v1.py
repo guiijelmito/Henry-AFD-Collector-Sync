@@ -10,7 +10,6 @@ from playwright.sync_api import sync_playwright
 
 from ..afd_validation import preencher_intervalo_data_hora, validar_afd_v1_no_intervalo
 from ..config import (
-    DIRETORIO_BASE,
     DIRETORIO_DOWNLOADS,
     HEADLESS_MODE,
     SENHA_V1,
@@ -20,32 +19,15 @@ from ..config import (
     validar_configuracao_relogio,
 )
 from ..logging_config import capturar_screenshot
-from ..state_store import audit_date_range, is_audit_due, record_audit_upload
 
 logger = logging.getLogger(__name__)
 
-# O estado pode ser montado em volume persistente no Docker.
-ARQUIVO_ESTADO = str(Path(DIRETORIO_BASE) / "estado_ponto.json")
 
-
-def janela_semanal_vencida():
-    """Informa se a coleta e o upload V1 são permitidos nesta sexta-feira."""
-    return is_audit_due(ARQUIVO_ESTADO, "v1", datetime.now().astimezone())
-
-
-def registrar_upload_enviado():
-    """Agenda a próxima auditoria V1 após upload bem-sucedido."""
-    if not record_audit_upload(ARQUIVO_ESTADO, "v1", datetime.now().astimezone()):
-        logger.warning("Auditoria V1 não registrada: fora da sexta-feira permitida")
-
-
-def automatizar_download_afd_v1():
-    """Baixa de segunda até o horário atual na janela semanal permitida."""
+def automatizar_download_afd_v1(data_inicial: str, data_final: str) -> str:
+    """Baixa o AFD do período informado (DD/MM/AAAA HH:MM) e devolve o caminho salvo."""
     validar_configuracao_relogio("v1")
     Path(DIRETORIO_DOWNLOADS).mkdir(parents=True, exist_ok=True)
     inicio = time.perf_counter()
-    agora = datetime.now().astimezone()
-    data_inicial, data_final = audit_date_range(agora)
     modo_headless = HEADLESS_MODE
     atraso_ms = SLOW_MO_MS
     data_inicial_arquivo = datetime.strptime(data_inicial, "%d/%m/%Y %H:%M").strftime("%Y-%m-%d")
@@ -187,4 +169,4 @@ if __name__ == "__main__":
     from ..logging_config import setup_logging
 
     setup_logging()
-    automatizar_download_afd_v1()
+    automatizar_download_afd_v1(input("Início (DD/MM/AAAA HH:MM): "), input("Fim: "))

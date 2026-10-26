@@ -46,6 +46,7 @@ class ResultadoUnidade:
     o_que_fazer: str = ""
     erro_tecnico: str = ""
     etapa: str = ""
+    periodo: str = ""
     arquivo: str = ""
     enviado: bool = False
     duracao_s: float = 0.0
@@ -110,8 +111,8 @@ def interpretar_erro(exc, etapa, unidade):
     if isinstance(exc, StateIntegrityError):
         return (
             "O arquivo estado_ponto.json está corrompido.",
-            "Abra o estado_ponto.json e corrija as datas next_audit_at_v1/v2 "
-            "(formato 2026-10-30T00:00:00-03:00) ou restaure um backup.",
+            "Abra o estado_ponto.json e corrija as datas next_audit_at e collected_until "
+            "(formato 2026-10-30T23:59-03:00) ou restaure um backup.",
         )
     if isinstance(exc, OSError) and "ausente" in texto:
         return (
@@ -230,6 +231,8 @@ def gerar_pdf(execucao, destino=None):
             linhas.append(u.mensagem)
         if u.o_que_fazer:
             linhas.append(f"O que fazer: {u.o_que_fazer}")
+        if u.periodo:
+            linhas.append(f"Período coletado: {u.periodo}")
         if u.arquivo:
             situacao = "enviado" if u.enviado else "não enviado"
             linhas.append(f"Arquivo: {Path(u.arquivo).name} ({situacao})")
