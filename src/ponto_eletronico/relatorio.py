@@ -12,37 +12,30 @@ from pathlib import Path
 
 from fpdf import FPDF
 
+from .afd_validation import AFDRangeValidationError
 from .logging_config import LOG_DIR, LOG_FILE
+from .state_store import StateIntegrityError
 
 RELATORIOS_DIR = LOG_DIR / "relatorios"
 
 OK = "OK"
-SEM_NOVIDADES = "SEM_NOVIDADES"
-AGUARDANDO = "AGUARDANDO"
+FORA_DA_JANELA = "FORA_DA_JANELA"
 FALHA = "FALHA"
+FALHA_TAILSCALE = "FALHA_TAILSCALE"
+STATUS_DE_FALHA = {FALHA, FALHA_TAILSCALE}
 
 DESCRICAO_STATUS = {
     OK: "Coletado e enviado",
-    SEM_NOVIDADES: "Sem batidas novas",
-    AGUARDANDO: "Fora da janela de coleta",
+    FORA_DA_JANELA: "Fora da janela de coleta",
     FALHA: "FALHOU",
+    FALHA_TAILSCALE: "FALHOU (Tailscale)",
 }
 COR_STATUS = {
     OK: (30, 130, 60),
-    SEM_NOVIDADES: (30, 100, 160),
-    AGUARDANDO: (110, 110, 110),
+    FORA_DA_JANELA: (110, 110, 110),
     FALHA: (190, 40, 40),
+    FALHA_TAILSCALE: (190, 40, 40),
 }
-
-
-@dataclass
-class Lote:
-    nsr_inicial: int
-    nsr_final: int
-    arquivo: str = ""
-    registros_novos: int = 0
-    ultimo_nsr: int | None = None
-    enviado: bool = False
 
 
 @dataclass
@@ -53,8 +46,9 @@ class ResultadoUnidade:
     o_que_fazer: str = ""
     erro_tecnico: str = ""
     etapa: str = ""
-    lotes: list[Lote] = field(default_factory=list)
-    proxima_coleta: str = ""
+    periodo: str = ""
+    arquivo: str = ""
+    enviado: bool = False
     duracao_s: float = 0.0
 
 
@@ -68,17 +62,17 @@ class Execucao:
 
     @property
     def houve_falha(self):
-        return any(u.status == FALHA for u in self.unidades)
+        return any(u.status in STATUS_DE_FALHA for u in self.unidades)
 
     @property
     def houve_coleta(self):
-        return any(u.status != AGUARDANDO for u in self.unidades)
+        return any(u.status != FORA_DA_JANELA for u in self.unidades)
 
     @property
     def status_geral(self):
         if self.houve_falha:
-            return "FALHA"
-        return "OK" if self.houve_coleta else "AGUARDANDO"
+            return FALHA
+        return OK if self.houve_coleta else FORA_DA_JANELA
 
     def resumo_texto(self):
         linhas = [f"Ponto eletrônico - {self.inicio:%d/%m/%Y %H:%M} - {self.status_geral}"]
@@ -87,7 +81,7 @@ class Execucao:
             if u.mensagem:
                 linha += f" - {u.mensagem}"
             linhas.append(linha)
-            if u.status == FALHA and u.o_que_fazer:
+            if u.o_que_fazer:
                 linhas.append(f"  O que fazer: {u.o_que_fazer}")
         return "\n".join(linhas)
 
@@ -114,16 +108,27 @@ def interpretar_erro(exc, etapa, unidade):
     texto = f"{type(exc).__name__}: {exc}"
     rede = "pelo Tailscale" if unidade == "V2" else "pela rede local"
 
-    if isinstance(exc, json.JSONDecodeError):
+    if isinstance(exc, StateIntegrityError):
         return (
             "O arquivo estado_ponto.json está corrompido.",
-            "Abra o estado_ponto.json, corrija o conteúdo (último NSR e próxima data) "
-            "ou restaure um backup. A coleta não roda sem ele para não baixar dados repetidos.",
+            "Abra o estado_ponto.json e corrija as datas next_audit_at e collected_until "
+            "(formato 2026-10-30T23:59-03:00) ou restaure um backup.",
         )
-    if "Variáveis de ambiente ausentes" in texto:
+    if isinstance(exc, OSError) and "ausente" in texto:
         return (
             "Faltam configurações no arquivo .env.",
             f"Preencha no .env as variáveis citadas no erro: {exc}",
+        )
+    if isinstance(exc, ConnectionError) and unidade == "V2":
+        return (
+            "O relógio V2 não respondeu pelo Tailscale.",
+            "Confira se o Tailscale está conectado neste PC e no galpão, se o IP_V2 do .env "
+            "está correto e se o relógio está ligado.",
+        )
+    if isinstance(exc, AFDRangeValidationError):
+        return (
+            f"O AFD da {unidade} veio sem marcações da semana ou com marcações fora dela.",
+            "Baixe o AFD manualmente no relógio pelo filtro de data/hora e confira o período.",
         )
     if etapa == "download":
         if "net::ERR" in texto or "Timeout" in texto:
@@ -196,11 +201,11 @@ def gerar_pdf(execucao, destino=None):
     pdf.ln(3)
 
     geral = execucao.status_geral
-    cor = COR_STATUS[FALHA] if geral == "FALHA" else COR_STATUS.get(geral, COR_STATUS[OK])
+    cor = COR_STATUS[geral]
     textos_gerais = {
-        "OK": "Tudo certo nesta execução.",
-        "FALHA": "Houve falha. Veja abaixo o que aconteceu e o que fazer.",
-        "AGUARDANDO": "Nenhuma unidade estava na janela de coleta. Nada a fazer.",
+        OK: "Tudo certo nesta execução.",
+        FALHA: "Houve falha. Veja abaixo o que aconteceu e o que fazer.",
+        FORA_DA_JANELA: "Nenhuma unidade estava na janela de coleta. Nada a fazer.",
     }
     pdf.set_fill_color(*cor)
     pdf.set_text_color(255, 255, 255)
@@ -226,15 +231,11 @@ def gerar_pdf(execucao, destino=None):
             linhas.append(u.mensagem)
         if u.o_que_fazer:
             linhas.append(f"O que fazer: {u.o_que_fazer}")
-        for lote in u.lotes:
-            intervalo = f"NSR {lote.nsr_inicial:09d} a {lote.nsr_final:09d}"
-            if not lote.arquivo:
-                linhas.append(f"{intervalo}: download não concluído")
-                continue
-            situacao = "enviado" if lote.enviado else "não enviado"
-            linhas.append(f"{intervalo}: {lote.registros_novos} registro(s) novo(s), {situacao}")
-        if u.proxima_coleta:
-            linhas.append(f"Próxima coleta liberada a partir de {u.proxima_coleta}")
+        if u.periodo:
+            linhas.append(f"Período coletado: {u.periodo}")
+        if u.arquivo:
+            situacao = "enviado" if u.enviado else "não enviado"
+            linhas.append(f"Arquivo: {Path(u.arquivo).name} ({situacao})")
         if u.duracao_s:
             linhas.append(f"Duração: {u.duracao_s:.0f}s")
         if u.erro_tecnico:

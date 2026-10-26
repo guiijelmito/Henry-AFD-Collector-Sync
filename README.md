@@ -4,14 +4,15 @@
 [![Playwright](https://img.shields.io/badge/Playwright-Automation-green.svg)](https://playwright.dev/python/)
 [![Status](https://img.shields.io/badge/Status-In%20Development-yellow.svg)]()
 
-Automated Python service designed to extract **AFD (Arquivo Fonte de Dados)** files from Henry Electronic Time Clocks (Super Fácil RO2 / Prisma Super Fácil R2) via Playwright web automation, featuring dynamic NSR (Sequential Number of Record) state tracking and automated cloud/PHP backend synchronization.
+Automated Python service that extracts **AFD (Arquivo Fonte de Dados)** files from Henry electronic time clocks (Super Fácil RO2 / Prisma Super Fácil R2) through Playwright and uploads them to the central panel.
 
 ---
 
 ## 🚀 Key Features
 
 - **Resilient Web Automation:** Uses Playwright to interact with Henry's web panel, handling authentication, sessions, and precise element selectors.
-- **Dynamic NSR State Management (`estado_ponto.json`):** Automatically calculates batch ranges per execution cycle, ensuring continuous data collection without gaps or overlaps.
+- **Weekly date/time collection:** Downloads records from where the last upload stopped (Monday 00:00 the first time) through the current time. NSRs remain part of the AFD records but are not used as collection cursors.
+- **Audit schedule (`estado_ponto.json`):** Keeps, per unit, the next permitted upload time (e.g. Friday 23:59) and how far the last upload went.
 - **Secure Configuration:** Isolates sensitive credentials and device IPs using environment variables (`.env`).
 - **Structured Storage:** Automatically saves extracted AFD files into a dedicated target directory (`afd_downloads/`).
 - **Backend Integration:** Designed to seamlessly feed extracted data into a PHP backend server and cloud infrastructure.
@@ -52,40 +53,70 @@ playwright install chromium
 
 ### 4. Configure environment variables
 
-Create a `.env` file in the root directory based on your clock settings:
+Copy `.env.example` to `.env` and set the panel credentials, both clock addresses,
+and the usernames and passwords. The V2 address must be reachable over Tailscale.
+The default download and log directories are created under the project folder.
+Set `DIRETORIO_BASE` or `DIRETORIO_DOWNLOADS` only when you need a different location.
 
 ```env
-SERVER_URL=https://example.invalid
-SERVER_USER=your_server_user
-SERVER_PASSWORD=replace_me
-IP_V1=192.0.2.10
-USUARIO_V1=your_clock_user
-SENHA_V1=replace_me
-IP_V2=192.0.2.20
-USUARIO_V2=your_clock_user
-SENHA_V2=replace_me
-HEADLESS_MODE=true
+copy .env.example .env
 ```
-
-See `.env.example` for the optional settings (batch size, retries, Telegram and e-mail alerts).
 
 ### 5. Initialize state file
 
-`estado_ponto.json` in the root directory keeps, per unit, the last NSR already sent and the
-date from which the next collection is allowed:
+`estado_ponto.json` keeps, per unit, when the next upload is allowed and how far
+the last upload went:
 
 ```json
 {
-  "last_nsr_v1": "000045076",
-  "last_nsr_v2": "000001153",
-  "next_date_v1": "2026-10-30",
-  "next_date_v2": "2026-10-30"
+  "next_audit_at_v1": "2026-10-30T23:59:00-03:00",
+  "next_audit_at_v2": "2026-10-30T23:59:00-03:00"
 }
 ```
 
-A unit is collected on or after its `next_date`. After a successful upload the NSR moves to the
-last record actually downloaded and `next_date` moves forward in 7-day steps, keeping the weekday.
-The older shared `next_date` key is still read as the default for both units.
+A unit is collected and uploaded at or after its `next_audit_at`, on any day. The first
+collection covers Monday 00:00 through now; each later one starts at the saved
+`collected_until_v1/v2`, so a late or failed run never leaves marks behind. After a
+successful upload, `collected_until` moves to the end of the collected period and
+`next_audit_at` moves forward in 7-day steps, keeping the configured weekday and time.
+A missing state file makes the first run eligible. The old `next_advance_at_v1/v2` and
+V1 `next_date` keys are read during migration.
+
+Date/time filters use `lblDataI` and `lblDataF` on both clocks. The V1 panel
+uses the `communication` filter view and download action `subCompD(5, 8, 2)`;
+the V2 panel uses `menuItem2` and `downloadData(1,32,2)`.
+
+## Docker (DigitalOcean Droplet)
+
+The image packages the application, Python dependencies, and the matching
+Playwright Chromium runtime. Compose runs the scheduled pipeline as a one-shot
+container; the Droplet's host scheduler can start it daily. The container
+uses the host network so it can use routes configured on the Droplet, including
+the V2 Tailscale route. Both clock addresses must be reachable from the host.
+
+Create a runtime environment file and persistent data directory on the host:
+
+```bash
+cp .env.example .env
+mkdir -p data
+```
+
+Fill `.env` with real credentials and reachable clock addresses, then build and
+run the scheduled pipeline:
+
+```bash
+docker compose build
+docker compose run --rm afd-collector
+```
+
+The `data/` directory is mounted at `/data` and retains `estado_ponto.json` and
+logs between runs. Downloaded AFDs are written under `/tmp` inside the container;
+with `--rm`, the container and those temporary files are removed after the run.
+The `.env` file is supplied at runtime and excluded from the image build context.
+Run this Compose configuration on Linux for the Droplet deployment because it
+uses host networking. Install and connect Tailscale on the Droplet host before
+expecting V2 to be reachable. This command runs the production schedule gate;
+before `next_audit_at`, it exits without collecting or uploading.
 
 ---
 
@@ -94,15 +125,22 @@ The older shared `next_date` key is still read as the default for both units.
 Run the main automation script:
 
 ```bash
-python main.py            # collects only the units whose next_date has arrived
-python main.py --forcar   # collects now, ignoring next_date
+python main.py
 ```
 
-Each run that collects something writes a report to `logs/relatorios/` (JSON and PDF) and,
-if configured, sends the summary and the PDF via Telegram (or e-mail as a fallback).
-The exit code is `1` when any unit failed, so the Windows Task Scheduler shows the failure.
+On Windows, `executar.bat` runs this command from the project directory and returns
+the Python process exit code.
 
-### Scheduling (Windows)
+### Retries, reports and alerts
+
+Download and upload are retried (`TENTATIVAS`, default 3) with a growing wait
+(`ESPERA_ENTRE_TENTATIVAS_S`). Every run that reaches a due unit writes a report to
+`logs/relatorios/` as JSON and PDF: status per unit, what went wrong in plain
+language, what to do next, warnings and failure screenshots. If configured in `.env`,
+the summary and the PDF are sent via Telegram, with SMTP e-mail as a fallback. The
+exit code is `1` when any unit failed, so the scheduler shows the failure.
+
+### Scheduling on Windows
 
 Run once, in an administrator PowerShell, from the project folder:
 
@@ -110,32 +148,61 @@ Run once, in an administrator PowerShell, from the project folder:
 powershell -ExecutionPolicy Bypass -File scripts\agendar_tarefa.ps1
 ```
 
-The task runs every day at 00:00. On days before `next_date` it exits in seconds without opening
-the browser, so a Friday missed because the PC was off, or a failed run, is retried the next night.
+The task runs every day at 23:59. Before `next_audit_at` it exits in seconds without
+opening the browser. If Friday's run fails or the PC is off, the next day's run collects
+from where the last upload stopped.
+
+## Development checks
+
+Install the pinned development tools and run the unit tests, branch coverage, lint,
+and formatting checks:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest --cov --cov-report=term-missing
+python -m ruff check .
+python -m ruff format --check .
+python -m pip_audit --local --strict
+```
+
+Pytest writes temporary files to `.tmp/pytest-basetemp`, avoiding Windows system
+temporary folders with restricted permissions. The folder is disposable and is
+cleared by pytest between runs. Ruff keeps its cache under `.tmp/ruff_cache`.
+
+The dependency audit inspects the active virtual environment, including installed
+transitive dependencies. Activate the environment populated with
+`requirements-dev.txt` before running it. `pip-audit` needs network access to query
+the vulnerability service; `--strict` makes dependency collection failures fail
+the command instead of silently producing an incomplete report.
+
+Coverage currently measures the isolated state persistence module; the Playwright
+flows still need browser and panel integration tests before the project can claim
+end-to-end coverage.
 
 ---
 
 ## 🗂️ Project Structure
 
 ```
-├── src/ponto_eletronico/  # Aplicação e regras de negócio
-│   ├── config.py
-│   ├── pipeline.py        # Coleta por unidade, tentativas e código de saída
-│   ├── estado.py          # estado_ponto.json: último NSR e janela de coleta
-│   ├── afd.py             # Leitura dos NSRs do arquivo AFD
-│   ├── relatorio.py       # Relatório JSON/PDF de cada execução
-│   ├── alertas.py         # Telegram e e-mail
-│   ├── cloud.py
-│   ├── logging_config.py
-│   ├── path_utils.py
-│   └── extractors/        # Automações Henry V1 e V2
-├── config/                # Exemplos de configuração
-├── scripts/               # Execução e manutenção
-├── tests/unit/            # Testes sem acessar relógios nem servidor
-├── tests/integration/     # Testes que dependem da infraestrutura
-├── main.py                # Atalho compatível para iniciar o pipeline
-├── executar.bat           # Atalho para o agendador do Windows
-└── README.md
+├── src/ponto_eletronico/
+│   ├── pipeline.py        # Orchestrates V1 and V2: window, retries, report, alert, exit code
+│   ├── state_store.py     # estado_ponto.json: next audit time per unit, atomic writes
+│   ├── afd_validation.py  # Date/time filter input and AFD range validation
+│   ├── extractors/        # Playwright automation for the V1 and V2 clocks
+│   ├── cloud.py           # Upload to the central panel
+│   ├── relatorio.py       # JSON/PDF run report
+│   ├── alertas.py         # Telegram and e-mail alerts
+│   ├── config.py          # Environment settings
+│   └── logging_config.py  # Console/file logging and screenshots
+├── scripts/
+│   ├── executar.bat       # Windows wrapper used by the scheduler
+│   └── agendar_tarefa.ps1 # Registers the daily task in Task Scheduler
+├── tests/unit/            # Tests that run without clocks or panel
+├── tests/integration/     # Tests that need the real infrastructure
+├── config/                # Example state file
+├── Dockerfile, compose.yaml
+├── main.py                # Entry point (python main.py)
+└── executar.bat           # Shortcut to scripts/executar.bat
 ```
 
 ---

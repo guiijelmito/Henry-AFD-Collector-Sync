@@ -1,17 +1,17 @@
 ﻿<#
 Registra a coleta de ponto no Agendador de Tarefas do Windows.
 
-Roda TODO DIA às 00:00. O próprio script só coleta quando a data liberada
-(next_date) chegou, então nos outros dias ele termina em segundos sem abrir o navegador.
-Com isso, se o PC estiver desligado na sexta, a coleta acontece sozinha no dia seguinte,
-e uma coleta que falhou é tentada de novo na noite seguinte.
+Roda TODO DIA às 23:59. O próprio script só coleta quando chega o next_audit_at do
+estado_ponto.json (ex.: sexta 23:59); nos outros dias termina em segundos sem abrir o
+navegador. Se a coleta de sexta falhar ou o PC estiver desligado, ela acontece no dia
+seguinte, começando de onde a última coleta parou, sem perder marcações.
 
 Uso (PowerShell como administrador, na pasta do projeto):
     powershell -ExecutionPolicy Bypass -File scripts\agendar_tarefa.ps1
 #>
 param(
     [string]$NomeTarefa = "Coleta Ponto Eletronico",
-    [string]$Horario = "00:00"
+    [string]$Horario = "23:59"
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,8 +31,6 @@ $config = New-ScheduledTaskSettingsSet `
     -WakeToRun `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
-    -RestartCount 2 `
-    -RestartInterval (New-TimeSpan -Minutes 30) `
     -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
     -MultipleInstances IgnoreNew
 

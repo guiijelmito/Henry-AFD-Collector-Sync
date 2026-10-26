@@ -3,6 +3,10 @@
 - Console: formato enxuto e colorido (desenvolvimento/CLI), nível via LOG_LEVEL (padrão INFO).
 - Arquivo: RotatingFileHandler com milissegundos, módulo, função e linha (produção), sempre DEBUG.
 - Exceções não tratadas são registradas como CRITICAL com traceback completo.
+
+O diretório de logs também recebe screenshots de diagnóstico. Esses arquivos
+podem conter dados exibidos pelo relógio ou pelo painel e devem ter acesso
+restrito.
 """
 
 import logging
@@ -15,14 +19,15 @@ from typing import ClassVar
 
 from dotenv import load_dotenv
 
-from .path_utils import configured_path
-
+# O pipeline importa este módulo antes do config.py; sem isto, DIRETORIO_BASE,
+# LOG_DIR e LOG_LEVEL definidos no .env seriam ignorados.
 load_dotenv()
 
 env_base = os.getenv("DIRETORIO_BASE")
-DIRETORIO_BASE = configured_path(env_base, Path(__file__).resolve().parents[2])
+# Sem DIRETORIO_BASE, os logs ficam na raiz do projeto (mesma regra do config.py)
+DIRETORIO_BASE = Path(env_base) if env_base else Path(__file__).resolve().parents[2]
 
-LOG_DIR = configured_path(os.getenv("LOG_DIR"), DIRETORIO_BASE / "logs")
+LOG_DIR = Path(os.getenv("LOG_DIR", DIRETORIO_BASE / "logs"))
 LOG_FILE = LOG_DIR / "afd_collector.log"
 SCREENSHOT_DIR = LOG_DIR / "screenshots"
 
@@ -47,10 +52,12 @@ class ColorFormatter(logging.Formatter):
     }
 
     def __init__(self, fmt, datefmt, use_color=True):
+        """Define o formato e se os códigos ANSI serão aplicados ao console."""
         super().__init__(fmt, datefmt)
         self.use_color = use_color
 
     def format(self, record):
+        """Formata o nível com cor temporariamente, sem alterar o registro."""
         original = record.levelname
         if self.use_color:
             record.levelname = f"{self.COLORS.get(original, '')}{original}{self.RESET}"
@@ -61,6 +68,7 @@ class ColorFormatter(logging.Formatter):
 
 
 def _log_uncaught(exc_type, exc_value, exc_tb):
+    """Registra exceções fatais; deixa Ctrl+C seguir o tratamento padrão."""
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_tb)
         return
@@ -101,7 +109,8 @@ def setup_logging() -> logging.Logger:
 def capturar_screenshot(page, tag: str, logger: logging.Logger | None = None):
     """Salva um screenshot de diagnóstico da página (uso em falhas do Playwright).
 
-    Atenção: o screenshot pode conter dados sensíveis; restrinja o acesso a LOG_DIR.
+    O screenshot pode conter dados sensíveis; restrinja o acesso a ``LOG_DIR``.
+    Retorna o caminho gravado ou ``None`` se a captura falhar.
     """
     log = logger or logging.getLogger(__name__)
     try:

@@ -1,1 +1,1 @@
-Testes externos que exigem relógios Henry, rede Tailscale ou painel de upload devem ser implementados aqui e executados apenas com infraestrutura de teste.
+Integrações que exigem relógios Henry, Tailscale ou painel devem ficar neste diretório e ser executadas apenas com infraestrutura de teste.
