@@ -10,6 +10,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 
 from .logging_config import SCREENSHOT_DIR, setup_logging
 
@@ -21,7 +22,13 @@ from .cloud import enviar_afd_para_servidor  # noqa: E402
 from .extractors.henry_v1 import automatizar_download_afd_v1  # noqa: E402
 from .extractors.henry_v2 import TailnetConnectionError, automatizar_download_afd_v2  # noqa: E402
 from .relatorio import FALHA, FALHA_TAILSCALE, FORA_DA_JANELA  # noqa: E402
-from .state_store import audit_date_range, is_audit_due, record_audit_upload  # noqa: E402
+from .state_store import (  # noqa: E402
+    is_audit_due,
+    pending_weeks,
+    record_week_sent,
+    week_range,
+    week_start,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +55,14 @@ def _com_tentativas(descricao, funcao):
             _dormir(espera)
 
 
-def _processar_unidade(unidade, etapa, funcao_extracao, agora=None, arquivo_estado=None):
-    """Executa extração e upload e devolve o resultado da unidade para o relatório.
+def _processar_unidade(
+    unidade, etapa, funcao_extracao, agora=None, arquivo_estado=None, semana_forcada=None
+):
+    """Coleta e envia as semanas pendentes da unidade e devolve o resultado para o relatório.
 
-    A exceção da unidade é registrada e convertida em falha para permitir
-    que a outra unidade também seja processada.
+    Com ``semana_forcada`` (domingo da semana), coleta e envia só essa semana,
+    sem consultar nem alterar o estado. A exceção da unidade é registrada e
+    convertida em falha para permitir que a outra unidade também seja processada.
     """
     logger.info("[%s] Processando unidade %s", etapa, unidade)
     versao = unidade.lower()
@@ -62,32 +72,46 @@ def _processar_unidade(unidade, etapa, funcao_extracao, agora=None, arquivo_esta
     inicio = time.perf_counter()
     try:
         resultado.etapa = "estado"
-        if not is_audit_due(arquivo_estado, versao, agora):
+        if semana_forcada is not None:
+            semanas = [semana_forcada]
+        elif not is_audit_due(arquivo_estado, versao, agora):
             logger.info(
-                "Upload da unidade %s ainda não liberado (next_audit_at no futuro)", unidade
+                "Coleta da unidade %s ainda não liberada (next_audit_at no futuro)", unidade
             )
             resultado.status = FORA_DA_JANELA
             return resultado
+        else:
+            semanas = pending_weeks(arquivo_estado, versao, agora, config.MAX_SEMANAS_POR_EXECUCAO)
+        if not semanas:
+            logger.info("Unidade %s sem semana encerrada pendente", unidade)
+            resultado.status = FORA_DA_JANELA
+            return resultado
 
-        data_inicial, data_final = audit_date_range(arquivo_estado, versao, agora)
-        resultado.periodo = f"{data_inicial} a {data_final}"
-        resultado.etapa = "download"
-        caminho_afd = _com_tentativas(
-            f"Download {unidade}", lambda: funcao_extracao(data_inicial, data_final)
-        )
-        if not caminho_afd or not os.path.exists(caminho_afd):
-            raise relatorio.ArquivoInvalido(f"O download da {unidade} não gerou arquivo.")
-        resultado.arquivo = caminho_afd
+        for semana in semanas:
+            data_inicial, data_final = week_range(semana)
+            periodo = f"{data_inicial} a {data_final}"
+            logger.info("[%s] Semana %s", unidade, periodo)
 
-        resultado.etapa = "upload"
-        _com_tentativas(
-            f"Upload {unidade}", lambda: enviar_afd_para_servidor(caminho_afd, unidade=unidade)
-        )
-        resultado.enviado = True
+            resultado.etapa = "download"
+            caminho_afd = _com_tentativas(
+                f"Download {unidade}",
+                lambda inicio=data_inicial, fim=data_final: funcao_extracao(inicio, fim),
+            )
+            if not caminho_afd or not os.path.exists(caminho_afd):
+                raise relatorio.ArquivoInvalido(f"O download da {unidade} não gerou arquivo.")
 
-        resultado.etapa = "estado"
-        record_audit_upload(arquivo_estado, versao, data_final, agora)
-        resultado.mensagem = "AFD do período baixado e enviado ao painel."
+            resultado.etapa = "upload"
+            _com_tentativas(
+                f"Upload {unidade}",
+                lambda caminho=caminho_afd: enviar_afd_para_servidor(caminho, unidade=unidade),
+            )
+            resultado.semanas.append(f"{periodo}: enviada ({Path(caminho_afd).name})")
+
+            if semana_forcada is None:
+                resultado.etapa = "estado"
+                record_week_sent(arquivo_estado, versao, semana)
+
+        resultado.mensagem = f"{len(semanas)} semana(s) baixada(s) e enviada(s) ao painel."
         logger.info(
             "Unidade %s processada e enviada com sucesso em %.1fs",
             unidade,
@@ -112,15 +136,19 @@ def _registrar_falha(resultado, status, exc):
     )
 
 
-def executar():
+def executar(semana_forcada=None):
     """Processa V1 e V2 em sequência e devolve a execução com o resultado de cada uma."""
     execucao = relatorio.Execucao(inicio=datetime.now())
     coletor = relatorio.ColetorDeAvisos()
     logging.getLogger().addHandler(coletor)
     try:
         execucao.unidades = [
-            _processar_unidade("V1", "1/2", automatizar_download_afd_v1),
-            _processar_unidade("V2", "2/2", automatizar_download_afd_v2),
+            _processar_unidade(
+                "V1", "1/2", automatizar_download_afd_v1, semana_forcada=semana_forcada
+            ),
+            _processar_unidade(
+                "V2", "2/2", automatizar_download_afd_v2, semana_forcada=semana_forcada
+            ),
         ]
     finally:
         logging.getLogger().removeHandler(coletor)
@@ -135,10 +163,18 @@ def executar():
     return execucao
 
 
-def pipeline_principal() -> int:
-    """Executa tudo, gera o relatório, envia o alerta e devolve o código de saída."""
+def pipeline_principal(semana=None) -> int:
+    """Executa tudo, gera o relatório, envia o alerta e devolve o código de saída.
+
+    ``semana`` (data dentro da semana desejada) força a coleta e o envio dessa
+    semana de domingo a sábado, sem alterar o estado.
+    """
     logger.info("=== Iniciando pipeline completo de ponto eletrônico (V1 & V2) ===")
-    execucao = executar()
+    semana_forcada = None
+    if semana is not None:
+        semana_forcada = week_start(datetime.combine(semana, datetime.min.time()).astimezone())
+        logger.info("Semana forçada: %s (estado não será alterado)", semana_forcada.date())
+    execucao = executar(semana_forcada)
     resumo = " | ".join(f"{u.unidade}={u.status}" for u in execucao.unidades)
 
     if not execucao.houve_coleta:

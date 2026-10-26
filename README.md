@@ -11,8 +11,8 @@ Automated Python service that extracts **AFD (Arquivo Fonte de Dados)** files fr
 ## 🚀 Key Features
 
 - **Resilient Web Automation:** Uses Playwright to interact with Henry's web panel, handling authentication, sessions, and precise element selectors.
-- **Weekly date/time collection:** Downloads records from where the last upload stopped (Monday 00:00 the first time) through the current time. NSRs remain part of the AFD records but are not used as collection cursors.
-- **Audit schedule (`estado_ponto.json`):** Keeps, per unit, the next permitted upload time (e.g. Friday 23:59) and how far the last upload went.
+- **Closed-week collection:** Downloads each finished week, Sunday 00:00 to Saturday 23:59, one AFD per week. Missed weeks are recovered in order (up to `MAX_SEMANAS_POR_EXECUCAO`, default 4, per run). NSRs remain part of the AFD records but are not used as collection cursors.
+- **Schedule (`estado_ponto.json`):** Keeps, per unit, the last week sent and the next permitted collection time (Sunday 00:05).
 - **Secure Configuration:** Isolates sensitive credentials and device IPs using environment variables (`.env`).
 - **Structured Storage:** Automatically saves extracted AFD files into a dedicated target directory (`afd_downloads/`).
 - **Backend Integration:** Designed to seamlessly feed extracted data into a PHP backend server and cloud infrastructure.
@@ -64,23 +64,33 @@ copy .env.example .env
 
 ### 5. Initialize state file
 
-`estado_ponto.json` keeps, per unit, when the next upload is allowed and how far
-the last upload went:
+`estado_ponto.json` keeps, per unit, the Sunday of the last week sent and when the
+next collection is allowed:
 
 ```json
 {
-  "next_audit_at_v1": "2026-10-30T23:59:00-03:00",
-  "next_audit_at_v2": "2026-10-30T23:59:00-03:00"
+  "ultima_semana_v1": "2026-10-11",
+  "next_audit_at_v1": "2026-10-25T00:05-03:00",
+  "ultima_semana_v2": "2026-10-11",
+  "next_audit_at_v2": "2026-10-25T00:05-03:00"
 }
 ```
 
-A unit is collected and uploaded at or after its `next_audit_at`, on any day. The first
-collection covers Monday 00:00 through now; each later one starts at the saved
-`collected_until_v1/v2`, so a late or failed run never leaves marks behind. After a
-successful upload, `collected_until` moves to the end of the collected period and
-`next_audit_at` moves forward in 7-day steps, keeping the configured weekday and time.
-A missing state file makes the first run eligible. The old `next_advance_at_v1/v2` and
-V1 `next_date` keys are read during migration.
+A unit is collected at or after its `next_audit_at`, on any day. Each run sends the
+closed weeks after `ultima_semana_v1/v2` (Sunday 00:00 to Saturday 23:59), oldest
+first; a week is only closed after Saturday 23:59. After each week is uploaded,
+`ultima_semana` becomes that week and `next_audit_at` becomes the Sunday 00:05 right
+after the following week ends. Without state, the first run sends the last closed
+week. Weeks without punches (holidays, vacations) are still uploaded. The old
+`next_advance_at_v1/v2` and V1 `next_date` keys are read during migration, and
+`collected_until_v1/v2` is discarded.
+
+To send one week again (for example, after a panel problem) without changing the
+state, pass any date inside it:
+
+```bash
+python main.py --semana 2026-10-18
+```
 
 Date/time filters use `lblDataI` and `lblDataF` on both clocks. The V1 panel
 uses the `communication` filter view and download action `subCompD(5, 8, 2)`;
@@ -148,9 +158,9 @@ Run once, in an administrator PowerShell, from the project folder:
 powershell -ExecutionPolicy Bypass -File scripts\agendar_tarefa.ps1
 ```
 
-The task runs every day at 23:59. Before `next_audit_at` it exits in seconds without
-opening the browser. If Friday's run fails or the PC is off, the next day's run collects
-from where the last upload stopped.
+The task runs every day at 00:05. Before `next_audit_at` it exits in seconds without
+opening the browser. If Sunday's run fails or the PC is off, the next day's run sends
+the weeks still pending, in order.
 
 ## Development checks
 
@@ -186,7 +196,7 @@ end-to-end coverage.
 ```
 ├── src/ponto_eletronico/
 │   ├── pipeline.py        # Orchestrates V1 and V2: window, retries, report, alert, exit code
-│   ├── state_store.py     # estado_ponto.json: next audit time per unit, atomic writes
+│   ├── state_store.py     # estado_ponto.json: last week sent and next collection time per unit, atomic writes
 │   ├── afd_validation.py  # Date/time filter input and AFD range validation
 │   ├── extractors/        # Playwright automation for the V1 and V2 clocks
 │   ├── cloud.py           # Upload to the central panel
