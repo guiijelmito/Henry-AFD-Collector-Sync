@@ -2,10 +2,11 @@
 
 Por unidade, o arquivo guarda:
 
-- ``next_audit_at_vX``: a partir de quando o upload é permitido (o "next_date");
-- ``collected_until_vX``: até que data e hora a última coleta enviada chegou.
+- ``ultima_semana_vX``: domingo da última semana (domingo a sábado) enviada;
+- ``next_audit_at_vX``: a partir de quando a coleta é permitida (o "next_date").
 
-As chaves antigas ``next_advance_at_vX`` e ``next_date`` são lidas na migração.
+As chaves antigas ``next_advance_at_vX`` e ``next_date`` são lidas na migração, e
+``collected_until_vX`` é descartada.
 """
 
 from __future__ import annotations
@@ -79,70 +80,73 @@ def _next_audit(data: Mapping[str, Any], version: str, tzinfo) -> datetime | Non
     return None if value is None else _parse_moment(value, tzinfo)
 
 
+def week_start(moment: datetime) -> datetime:
+    """Domingo 00:00 da semana do momento informado (semanas de domingo a sábado)."""
+    days_since_sunday = (moment.weekday() + 1) % 7
+    return (moment - timedelta(days=days_since_sunday)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+
+def week_range(start: datetime) -> tuple[str, str]:
+    """Período do filtro do relógio: domingo 00:00 até sábado 23:59."""
+    end = start + timedelta(days=7) - timedelta(minutes=1)
+    return start.strftime(DATE_FORMAT), end.strftime(DATE_FORMAT)
+
+
 def is_audit_due(
     path: str | Path,
     version: str,
     now: datetime | None = None,
 ) -> bool:
-    """O upload é permitido no horário do next_audit_at da unidade ou depois dele."""
+    """A coleta é permitida no horário do next_audit_at da unidade ou depois dele."""
     _check_version(version)
     current_time = _current_time(now)
     due_at = _next_audit(load_state_data(path), version, current_time.tzinfo)
     return due_at is None or current_time >= due_at
 
 
-def audit_date_range(
+def pending_weeks(
     path: str | Path,
     version: str,
     now: datetime | None = None,
-) -> tuple[str, str]:
-    """Período a coletar: de onde a última coleta parou (ou segunda 00:00) até agora.
+    limit: int = 4,
+) -> list[datetime]:
+    """Domingos das semanas já encerradas que ainda não foram enviadas, em ordem.
 
-    Começar onde a anterior parou garante que nenhuma marcação fique de fora,
-    mesmo que uma coleta atrase ou falhe por alguns dias.
+    Começa na semana seguinte à ``ultima_semana_vX``. Sem esse valor, começa
+    na última semana encerrada. Uma semana só entra depois do sábado 23:59.
     """
     _check_version(version)
     current_time = _current_time(now)
-    collected_until = load_state_data(path).get(f"collected_until_{version}")
-    if collected_until is None:
-        start = (current_time - timedelta(days=current_time.weekday())).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+    last_sent = load_state_data(path).get(f"ultima_semana_{version}")
+    if last_sent is None:
+        start = week_start(current_time) - timedelta(days=7)
     else:
-        start = _parse_moment(collected_until, current_time.tzinfo)
-    return start.strftime(DATE_FORMAT), current_time.strftime(DATE_FORMAT)
+        start = week_start(_parse_moment(last_sent, current_time.tzinfo)) + timedelta(days=7)
+
+    weeks = []
+    while start + timedelta(days=7) <= current_time and len(weeks) < limit:
+        weeks.append(start)
+        start += timedelta(days=7)
+    return weeks
 
 
-def record_audit_upload(
-    path: str | Path,
-    version: str,
-    collected_until: str,
-    now: datetime | None = None,
-) -> bool:
-    """Após upload bem-sucedido, guarda até onde coletou e agenda a próxima auditoria.
+def record_week_sent(path: str | Path, version: str, start: datetime) -> None:
+    """Após o upload de uma semana, guarda-a e agenda a próxima coleta.
 
-    A próxima auditoria anda de 7 em 7 dias a partir da anterior, mantendo o dia
-    e a hora configurados (ex.: toda sexta às 23:59) mesmo se esta coleta atrasou.
+    O next_audit_at vira domingo 00:05 logo depois de a semana seguinte terminar.
     """
     _check_version(version)
-    current_time = _current_time(now)
     data = load_state_data(path)
-    due_at = _next_audit(data, version, current_time.tzinfo)
-    if due_at is not None and current_time < due_at:
-        return False
-
-    next_audit = due_at or current_time
-    while next_audit <= current_time:
-        next_audit += timedelta(days=7)
-
-    end = datetime.strptime(collected_until, DATE_FORMAT).replace(tzinfo=current_time.tzinfo)
-    data[f"collected_until_{version}"] = end.isoformat(timespec="minutes")
+    data[f"ultima_semana_{version}"] = start.date().isoformat()
+    next_audit = start + timedelta(days=14, minutes=5)
     data[f"next_audit_at_{version}"] = next_audit.isoformat(timespec="minutes")
-    data.pop(f"next_advance_at_{version}", None)
+    for legacy_key in (f"next_advance_at_{version}", f"collected_until_{version}"):
+        data.pop(legacy_key, None)
     if version == "v1":
         data.pop("next_date", None)
     write_state_data(path, data)
-    return True
 
 
 def write_state_data(path: str | Path, data: Mapping[str, Any]) -> None:

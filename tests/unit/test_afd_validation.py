@@ -152,15 +152,15 @@ def test_validar_afd_rejeita_registros_fora_do_intervalo(tmp_path: Path):
         )
 
 
-def test_validar_afd_rejeita_arquivo_sem_marcacoes(tmp_path: Path):
-    path = tmp_path / "not-afd.txt"
+def test_validar_afd_aceita_semana_sem_marcacoes(tmp_path: Path):
+    path = tmp_path / "ferias.afd"
     path.write_text("x" * 100, encoding="utf-8")
 
-    with pytest.raises(AFDRangeValidationError, match="não contém registros"):
-        validar_afd_v1_no_intervalo(
-            path,
-            ("19/10/2026 00:00", "19/10/2026 23:59"),
-        )
+    assert validar_afd_v1_no_intervalo(path, ("18/10/2026 00:00", "24/10/2026 23:59")) == (
+        datetime(2026, 10, 18, 0, 0),
+        datetime(2026, 10, 24, 23, 59),
+        0,
+    )
 
 
 def test_validar_afd_v2_usa_timestamp_iso8601_do_layout_v2(tmp_path: Path):

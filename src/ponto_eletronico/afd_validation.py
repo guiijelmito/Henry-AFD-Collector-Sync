@@ -48,7 +48,10 @@ def _validar_marcacoes_no_intervalo(
     # O filtro tem precisão de minuto; a V2 grava segundos (10:15:30 cabe em "10:15")
     fim = datetime.strptime(intervalo[1], "%d/%m/%Y %H:%M") + timedelta(seconds=59)
     if not marcacoes:
-        raise AFDRangeValidationError("O arquivo não contém registros de marcação AFD válidos")
+        # Semana sem marcações (feriado, férias coletivas) é válida e o AFD é enviado
+        # mesmo assim, por decisão do projeto (26/10/2026). Se isso mudar, voltar a
+        # levantar AFDRangeValidationError aqui.
+        return inicio, fim - timedelta(seconds=59), 0
 
     fora_do_intervalo = [marcacao for marcacao in marcacoes if not inicio <= marcacao <= fim]
     if fora_do_intervalo:
