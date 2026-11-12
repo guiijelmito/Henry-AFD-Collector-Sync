@@ -114,9 +114,8 @@ def test_before_next_date_skips_extraction_and_upload(estado, monkeypatch):
     assert processar("V1", fail_if_called, estado).status == "FORA_DA_JANELA"
 
 
-def test_forced_week_is_sent_without_touching_state(estado, afd, monkeypatch):
-    original = '{"next_audit_at_v1": "2026-11-01T00:05-03:00"}'
-    estado.write_text(original, encoding="utf-8")
+def test_forced_week_is_recorded_per_unit_without_touching_the_schedule(estado, afd, monkeypatch):
+    estado.write_text('{"next_audit_at_v1": "2026-11-01T00:05-03:00"}', encoding="utf-8")
     monkeypatch.setattr(main, "enviar_afd_para_servidor", lambda path, unidade: None)
     periodos = []
 
@@ -129,7 +128,43 @@ def test_forced_week_is_sent_without_touching_state(estado, afd, monkeypatch):
 
     assert resultado.status == "OK"
     assert periodos == [("11/10/2026 00:00", "17/10/2026 23:59")]
-    assert estado.read_text(encoding="utf-8") == original
+    assert load_state_data(estado) == {
+        "next_audit_at_v1": "2026-11-01T00:05-03:00",
+        "semanas_avulsas_v1": ["2026-10-11"],
+    }
+
+
+@pytest.mark.parametrize(
+    "estado_inicial",
+    ['{"semanas_avulsas_v2": ["2026-11-08"]}', '{"ultima_semana_v2": "2026-11-08"}'],
+)
+def test_forced_rerun_skips_unit_that_already_sent_the_week(estado, estado_inicial, monkeypatch):
+    estado.write_text(estado_inicial, encoding="utf-8")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("week already sent must not be uploaded again")
+
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", fail_if_called)
+    semana = datetime(2026, 11, 8, tzinfo=timezone(timedelta(hours=-3)))
+
+    resultado = processar("V2", fail_if_called, estado, semana_forcada=semana)
+
+    assert resultado.status == "FORA_DA_JANELA"
+    assert "não foi reenviada" in resultado.mensagem
+    assert estado.read_text(encoding="utf-8") == estado_inicial
+
+
+def test_forced_week_failed_upload_is_not_recorded(estado, afd, monkeypatch):
+    def failed_upload(path, unidade):
+        raise RuntimeError("upload failed")
+
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", failed_upload)
+    semana = datetime(2026, 11, 8, tzinfo=timezone(timedelta(hours=-3)))
+
+    resultado = processar("V1", lambda inicio, fim: afd, estado, semana_forcada=semana)
+
+    assert resultado.status == "FALHA"
+    assert load_state_data(estado) == {}
 
 
 def test_tailnet_connection_failure_has_specific_status_and_message(estado, caplog):

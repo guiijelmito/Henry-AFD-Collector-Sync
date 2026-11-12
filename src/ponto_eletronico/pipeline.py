@@ -25,7 +25,9 @@ from .relatorio import FALHA, FALHA_TAILSCALE, FORA_DA_JANELA  # noqa: E402
 from .state_store import (  # noqa: E402
     is_audit_due,
     pending_weeks,
+    record_forced_week_sent,
     record_week_sent,
+    week_already_sent,
     week_range,
     week_start,
 )
@@ -61,7 +63,8 @@ def _processar_unidade(
     """Coleta e envia as semanas pendentes da unidade e devolve o resultado para o relatório.
 
     Com ``semana_forcada`` (domingo da semana), coleta e envia só essa semana,
-    sem consultar nem alterar o estado. A exceção da unidade é registrada e
+    fora da fila do agendamento. Se a unidade já enviou essa semana, ela é pulada
+    para não sobrescrever o painel. A exceção da unidade é registrada e
     convertida em falha para permitir que a outra unidade também seja processada.
     """
     logger.info("[%s] Processando unidade %s", etapa, unidade)
@@ -73,6 +76,15 @@ def _processar_unidade(
     try:
         resultado.etapa = "estado"
         if semana_forcada is not None:
+            if week_already_sent(arquivo_estado, versao, semana_forcada):
+                logger.info(
+                    "Unidade %s já enviou a semana de %s; não será reenviada",
+                    unidade,
+                    semana_forcada.strftime("%d/%m/%Y"),
+                )
+                resultado.status = FORA_DA_JANELA
+                resultado.mensagem = "Semana já enviada por esta unidade; não foi reenviada."
+                return resultado
             semanas = [semana_forcada]
         elif not is_audit_due(arquivo_estado, versao, agora):
             logger.info(
@@ -107,9 +119,11 @@ def _processar_unidade(
             )
             resultado.semanas.append(f"{periodo}: enviada ({Path(caminho_afd).name})")
 
+            resultado.etapa = "estado"
             if semana_forcada is None:
-                resultado.etapa = "estado"
                 record_week_sent(arquivo_estado, versao, semana)
+            else:
+                record_forced_week_sent(arquivo_estado, versao, semana)
 
         resultado.mensagem = f"{len(semanas)} semana(s) baixada(s) e enviada(s) ao painel."
         logger.info(
@@ -167,13 +181,16 @@ def pipeline_principal(semana=None) -> int:
     """Executa tudo, gera o relatório, envia o alerta e devolve o código de saída.
 
     ``semana`` (data dentro da semana desejada) força a coleta e o envio dessa
-    semana de domingo a sábado, sem alterar o estado.
+    semana de domingo a sábado, sem mexer na fila do agendamento; cada unidade
+    envia a semana uma vez só.
     """
     logger.info("=== Iniciando pipeline completo de ponto eletrônico (V1 & V2) ===")
     semana_forcada = None
     if semana is not None:
         semana_forcada = week_start(datetime.combine(semana, datetime.min.time()).astimezone())
-        logger.info("Semana forçada: %s (estado não será alterado)", semana_forcada.date())
+        logger.info(
+            "Semana forçada: %s (fila do agendamento não será alterada)", semana_forcada.date()
+        )
     execucao = executar(semana_forcada)
     resumo = " | ".join(f"{u.unidade}={u.status}" for u in execucao.unidades)
 

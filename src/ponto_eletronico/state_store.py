@@ -3,7 +3,8 @@
 Por unidade, o arquivo guarda:
 
 - ``ultima_semana_vX``: domingo da última semana (domingo a sábado) enviada;
-- ``next_audit_at_vX``: a partir de quando a coleta é permitida (o "next_date").
+- ``next_audit_at_vX``: a partir de quando a coleta é permitida (o "next_date");
+- ``semanas_avulsas_vX``: domingos das semanas enviadas à parte com ``--semana``.
 
 As chaves antigas ``next_advance_at_vX`` e ``next_date`` são lidas na migração, e
 ``collected_until_vX`` é descartada.
@@ -146,6 +147,29 @@ def record_week_sent(path: str | Path, version: str, start: datetime) -> None:
         data.pop(legacy_key, None)
     if version == "v1":
         data.pop("next_date", None)
+    write_state_data(path, data)
+
+
+def week_already_sent(path: str | Path, version: str, start: datetime) -> bool:
+    """A unidade já enviou essa semana, pela coleta agendada ou por ``--semana``."""
+    _check_version(version)
+    data = load_state_data(path)
+    last_sent = data.get(f"ultima_semana_{version}")
+    if last_sent is not None and start <= _parse_moment(last_sent, start.tzinfo):
+        return True
+    return start.date().isoformat() in data.get(f"semanas_avulsas_{version}", [])
+
+
+def record_forced_week_sent(path: str | Path, version: str, start: datetime) -> None:
+    """Guarda a semana enviada com ``--semana`` sem mexer na fila do agendamento."""
+    _check_version(version)
+    data = load_state_data(path)
+    sent = data.setdefault(f"semanas_avulsas_{version}", [])
+    if not isinstance(sent, list):
+        raise StateIntegrityError(f"semanas_avulsas_{version} deve ser uma lista")
+    if start.date().isoformat() not in sent:
+        sent.append(start.date().isoformat())
+        sent.sort()
     write_state_data(path, data)
 
 

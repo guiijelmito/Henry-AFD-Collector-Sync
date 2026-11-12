@@ -85,12 +85,17 @@ week. Weeks without punches (holidays, vacations) are still uploaded. The old
 `next_advance_at_v1/v2` and V1 `next_date` keys are read during migration, and
 `collected_until_v1/v2` is discarded.
 
-To send one week again (for example, after a panel problem) without changing the
-state, pass any date inside it:
+To send one specific week outside the schedule (for example, after a panel
+problem), pass any date inside it:
 
 ```bash
 python main.py --semana 2026-10-18
 ```
+
+Each unit sends a week only once. A unit that already sent that week (by the
+schedule, `ultima_semana_vX`, or by `--semana`, `semanas_avulsas_vX`) is skipped,
+so a rerun only retries the unit that failed and never overwrites the panel. To
+send a week again on purpose, remove it from `semanas_avulsas_vX` first.
 
 Date/time filters use `lblDataI` and `lblDataF` on both clocks. The V1 panel
 uses the `communication` filter view and download action `subCompD(5, 8, 2)`;

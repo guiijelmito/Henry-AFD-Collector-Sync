@@ -16,7 +16,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--semana",
         type=date.fromisoformat,
-        help="data (AAAA-MM-DD) da semana a coletar e enviar de novo, sem alterar o estado",
+        help="data (AAAA-MM-DD) da semana a coletar e enviar; unidade que já a enviou é pulada",
     )
     args = parser.parse_args(argv)
 
