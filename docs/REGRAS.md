@@ -2,6 +2,7 @@
 
 Este documento registra as regras de negócio da coleta e do envio do AFD ao painel.
 Qualquer mudança de regra deve ser atualizada aqui e no `CHANGELOG.md` no mesmo PR.
+Decisões de arquitetura ficam em `docs/adr/`.
 
 ## 1. Regra de ouro: um dia enviado nunca é enviado de novo
 
@@ -117,5 +118,5 @@ executar.bat --semana 2026-11-08
 | 26/10/2026 | Coleta por semanas fechadas, de domingo a sábado. |
 | 12/11/2026 | Controle de envio por unidade com `--semana`, para evitar sobrescrita. |
 | 14/11/2026 | O painel sobrescreve os registros e as correções manuais são feitas depois do envio: nenhum dia pode ser reenviado. |
-| 14/11/2026 | A coleta passa a ser diária, às 00:05, enviando só o dia anterior (dia fechado). |
+| 14/11/2026 | A coleta passa a ser diária, às 00:05, enviando só o dia anterior (dia fechado). Ver [ADR 0001](adr/0001-coleta-diaria-sem-reenvio.md). |
 | 14/11/2026 | O envio só conta com HTTP 200; sem resposta, o dia fica duvidoso e não é reenviado sem conferência. |

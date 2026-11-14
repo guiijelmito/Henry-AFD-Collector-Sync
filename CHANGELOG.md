@@ -1,6 +1,8 @@
 # Changelog
 
-Mudanças relevantes do projeto. As regras completas ficam em `docs/REGRAS.md`.
+Mudanças relevantes do projeto. O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
+e o projeto usa [Versionamento Semântico](https://semver.org/lang/pt-BR/). As regras
+completas ficam em `docs/REGRAS.md` e as decisões em `docs/adr/`.
 
 ## [Não lançado]
 
@@ -18,6 +20,8 @@ Mudanças relevantes do projeto. As regras completas ficam em `docs/REGRAS.md`.
   e geram alerta até serem resolvidos com `--resolver-duvidoso`.
 - Opção `--dia AAAA-MM-DD` para enviar dias específicos.
 - `docs/REGRAS.md` com as regras de negócio e o histórico de decisões.
+- ADR 0001 (`docs/adr/`) sobre a coleta diária sem reenvio.
+- Template de PR com checklist (`.github/pull_request_template.md`).
 
 ### Migração
 - O estado semanal (`ultima_semana_vX`, `semanas_avulsas_vX`) é lido automaticamente:
