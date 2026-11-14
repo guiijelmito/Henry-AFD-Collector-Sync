@@ -81,8 +81,8 @@ def _inteiro(nome: str, padrao: int) -> int:
 TENTATIVAS = _inteiro("TENTATIVAS", 3)
 ESPERA_ENTRE_TENTATIVAS_S = _inteiro("ESPERA_ENTRE_TENTATIVAS_S", 30)
 
-# Quantas semanas atrasadas uma execução recupera, uma de cada vez
-MAX_SEMANAS_POR_EXECUCAO = _inteiro("MAX_SEMANAS_POR_EXECUCAO", 4)
+# Quantos dias atrasados uma execução recupera, um de cada vez; o resto fica para a próxima
+MAX_DIAS_POR_EXECUCAO = _inteiro("MAX_DIAS_POR_EXECUCAO", 7)
 
 # Alertas opcionais: sem configuração, só o relatório local é gerado
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")

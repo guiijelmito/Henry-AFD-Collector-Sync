@@ -1,4 +1,4 @@
-"""Verifica a liberação pelo next_date, as semanas coletadas e a ordem upload -> estado."""
+"""Verifica a fila diária por unidade, a trava contra reenvio e a ordem upload -> estado."""
 
 import json
 from datetime import date, datetime, timedelta, timezone
@@ -7,10 +7,12 @@ import pytest
 
 from ponto_eletronico import config, relatorio
 from ponto_eletronico import pipeline as main
+from ponto_eletronico.cloud import UploadRecusado, UploadSemConfirmacao
 from ponto_eletronico.extractors.henry_v2 import TailnetConnectionError
 from ponto_eletronico.state_store import load_state_data
 
-SUNDAY = datetime(2026, 10, 25, 0, 5, tzinfo=timezone(timedelta(hours=-3)))
+TZ = timezone(timedelta(hours=-3))
+RUN = datetime(2026, 11, 15, 0, 5, tzinfo=TZ)  # domingo 00:05; ontem = sábado 14/11
 
 
 @pytest.fixture(autouse=True)
@@ -31,11 +33,15 @@ def afd(tmp_path):
     return str(caminho)
 
 
-def processar(unidade, extrator, estado, agora=SUNDAY, semana_forcada=None):
-    return main._processar_unidade(unidade, "1/1", extrator, agora, estado, semana_forcada)
+def processar(unidade, extrator, estado, agora=RUN, dias_forcados=None):
+    return main._processar_unidade(unidade, "1/1", extrator, agora, estado, dias_forcados)
 
 
-def test_collects_closed_week_then_records_state_after_upload(estado, afd, monkeypatch):
+def nao_chamar(*args, **kwargs):
+    raise AssertionError("dia já enviado não pode ser baixado nem enviado de novo")
+
+
+def test_sends_yesterday_and_records_state_only_after_upload(estado, afd, monkeypatch):
     eventos = []
     monkeypatch.setattr(
         main,
@@ -50,16 +56,18 @@ def test_collects_closed_week_then_records_state_after_upload(estado, afd, monke
     resultado = processar("V1", extrator, estado)
 
     assert resultado.status == "OK"
-    assert eventos == [("18/10/2026 00:00", "24/10/2026 23:59"), {}]  # estado vazio no upload
-    assert resultado.semanas == ["18/10/2026 00:00 a 24/10/2026 23:59: enviada (sample.afd)"]
-    assert load_state_data(estado) == {
-        "ultima_semana_v1": "2026-10-18",
-        "next_audit_at_v1": "2026-11-01T00:05-03:00",
-    }
+    assert eventos == [("14/11/2026 00:00", "14/11/2026 23:59"), {}]  # estado vazio no upload
+    assert resultado.dias == ["14/11/2026: enviado (sample.afd)"]
+    assert load_state_data(estado) == {"ultimo_dia_v1": "2026-11-14"}
 
 
-def test_late_run_sends_each_missed_week_in_order(estado, afd, monkeypatch):
-    estado.write_text('{"ultima_semana_v1": "2026-10-04"}', encoding="utf-8")
+def test_up_to_date_unit_does_nothing(estado):
+    estado.write_text('{"ultimo_dia_v1": "2026-11-14"}', encoding="utf-8")
+    assert processar("V1", nao_chamar, estado).status == "FORA_DA_JANELA"
+
+
+def test_late_run_sends_each_missed_day_in_order(estado, afd, monkeypatch):
+    estado.write_text('{"ultimo_dia_v1": "2026-11-11"}', encoding="utf-8")
     monkeypatch.setattr(main, "enviar_afd_para_servidor", lambda path, unidade: None)
     periodos = []
 
@@ -69,13 +77,64 @@ def test_late_run_sends_each_missed_week_in_order(estado, afd, monkeypatch):
 
     resultado = processar("V1", extrator, estado)
 
-    assert periodos == ["11/10/2026 00:00", "18/10/2026 00:00"]
-    assert len(resultado.semanas) == 2
-    assert load_state_data(estado)["ultima_semana_v1"] == "2026-10-18"
+    assert periodos == ["12/11/2026 00:00", "13/11/2026 00:00", "14/11/2026 00:00"]
+    assert resultado.mensagem.startswith("3 dia(s)")
+    assert load_state_data(estado)["ultimo_dia_v1"] == "2026-11-14"
 
 
-def test_failure_in_second_week_keeps_the_first_one_recorded(estado, afd, monkeypatch):
-    estado.write_text('{"ultima_semana_v1": "2026-10-04"}', encoding="utf-8")
+def test_recovery_is_per_unit(estado, afd, monkeypatch):
+    estado.write_text(
+        '{"ultimo_dia_v1": "2026-11-14", "ultimo_dia_v2": "2026-11-12"}', encoding="utf-8"
+    )
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", lambda path, unidade: None)
+    periodos = []
+
+    def extrator(inicio, fim):
+        periodos.append(inicio)
+        return afd
+
+    assert processar("V1", nao_chamar, estado).status == "FORA_DA_JANELA"
+    assert processar("V2", extrator, estado).status == "OK"
+    assert periodos == ["13/11/2026 00:00", "14/11/2026 00:00"]
+    assert load_state_data(estado) == {"ultimo_dia_v1": "2026-11-14", "ultimo_dia_v2": "2026-11-14"}
+
+
+def test_recovery_skips_days_already_sent_outside_the_queue(estado, afd, monkeypatch):
+    estado.write_text(
+        '{"ultimo_dia_v1": "2026-11-11", "dias_avulsos_v1": ["2026-11-13"]}', encoding="utf-8"
+    )
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", lambda path, unidade: None)
+    periodos = []
+
+    def extrator(inicio, fim):
+        periodos.append(inicio)
+        return afd
+
+    resultado = processar("V1", extrator, estado)
+
+    assert periodos == ["12/11/2026 00:00", "14/11/2026 00:00"]
+    assert "13/11/2026: não reenviado" in resultado.dias[1]
+    assert load_state_data(estado)["ultimo_dia_v1"] == "2026-11-14"
+
+
+def test_old_weekly_state_never_resends_the_last_weekly_upload(estado, afd, monkeypatch):
+    estado.write_text(
+        '{"ultima_semana_v1": "2026-11-01", "semanas_avulsas_v1": ["2026-11-08"]}',
+        encoding="utf-8",
+    )
+    enviados = []
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", lambda path, unidade: enviados.append(1))
+
+    resultado = processar("V1", nao_chamar, estado)
+
+    # 08/11 a 14/11 foram enviados com --semana na coleta antiga: nada é reenviado
+    assert resultado.status == "OK"
+    assert enviados == []
+    assert load_state_data(estado)["ultimo_dia_v1"] == "2026-11-14"
+
+
+def test_failure_in_second_day_keeps_the_first_one_recorded(estado, afd, monkeypatch):
+    estado.write_text('{"ultimo_dia_v1": "2026-11-12"}', encoding="utf-8")
     enviados = []
 
     def upload(path, unidade):
@@ -88,34 +147,60 @@ def test_failure_in_second_week_keeps_the_first_one_recorded(estado, afd, monkey
     resultado = processar("V1", lambda inicio, fim: afd, estado)
 
     assert resultado.status == "FALHA"
-    assert load_state_data(estado)["ultima_semana_v1"] == "2026-10-11"
+    assert load_state_data(estado)["ultimo_dia_v1"] == "2026-11-13"
 
 
-def test_state_is_not_recorded_when_upload_raises(estado, afd, monkeypatch):
-    def failed_upload(path, unidade):
-        raise RuntimeError("upload failed")
+def test_state_is_not_recorded_when_upload_is_refused(estado, afd, monkeypatch):
+    tentativas = []
 
-    monkeypatch.setattr(main, "enviar_afd_para_servidor", failed_upload)
+    def recusado(path, unidade):
+        tentativas.append(1)
+        raise UploadRecusado("HTTP 401")
+
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", recusado)
 
     resultado = processar("V1", lambda inicio, fim: afd, estado)
 
     assert resultado.status == "FALHA"
+    assert len(tentativas) == 3  # recusado = nada gravado, tentar de novo é seguro
+    assert "recusou" in resultado.mensagem
     assert load_state_data(estado) == {}
 
 
-def test_before_next_date_skips_extraction_and_upload(estado, monkeypatch):
-    estado.write_text('{"next_audit_at_v1": "2026-11-01T00:05-03:00"}', encoding="utf-8")
+def test_upload_without_confirmation_is_not_retried_and_locks_the_day(estado, afd, monkeypatch):
+    tentativas = []
 
-    def fail_if_called(*args, **kwargs):
-        raise AssertionError("unit work must be skipped while its window is closed")
+    def sem_resposta(path, unidade):
+        tentativas.append(1)
+        raise UploadSemConfirmacao("sem resposta")
 
-    monkeypatch.setattr(main, "enviar_afd_para_servidor", fail_if_called)
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", sem_resposta)
 
-    assert processar("V1", fail_if_called, estado).status == "FORA_DA_JANELA"
+    resultado = processar("V1", lambda inicio, fim: afd, estado)
+
+    assert resultado.status == "FALHA"
+    assert len(tentativas) == 1
+    assert "NÃO será reenviado" in resultado.mensagem
+    assert "--resolver-duvidoso" in resultado.o_que_fazer
+    assert load_state_data(estado) == {"dias_duvidosos_v1": ["2026-11-14"]}
 
 
-def test_forced_week_is_recorded_per_unit_without_touching_the_schedule(estado, afd, monkeypatch):
-    estado.write_text('{"next_audit_at_v1": "2026-11-01T00:05-03:00"}', encoding="utf-8")
+def test_queue_stops_at_a_doubtful_day_until_it_is_resolved(estado, monkeypatch):
+    estado.write_text(
+        '{"ultimo_dia_v1": "2026-11-12", "dias_duvidosos_v1": ["2026-11-13"]}', encoding="utf-8"
+    )
+    original = estado.read_text(encoding="utf-8")
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", nao_chamar)
+
+    resultado = processar("V1", nao_chamar, estado)
+
+    assert resultado.status == "FALHA"
+    assert "parada" in resultado.mensagem
+    assert estado.read_text(encoding="utf-8") == original
+
+
+def test_forced_days_are_recorded_without_touching_the_queue(estado, afd, monkeypatch):
+    estado.write_text('{"ultimo_dia_v1": "2026-11-05"}', encoding="utf-8")
     monkeypatch.setattr(main, "enviar_afd_para_servidor", lambda path, unidade: None)
     periodos = []
 
@@ -123,45 +208,60 @@ def test_forced_week_is_recorded_per_unit_without_touching_the_schedule(estado, 
         periodos.append((inicio, fim))
         return afd
 
-    semana = datetime(2026, 10, 11, tzinfo=timezone(timedelta(hours=-3)))
-    resultado = processar("V1", extrator, estado, semana_forcada=semana)
+    resultado = processar("V1", extrator, estado, dias_forcados=[date(2026, 11, 10)])
 
     assert resultado.status == "OK"
-    assert periodos == [("11/10/2026 00:00", "17/10/2026 23:59")]
+    assert periodos == [("10/11/2026 00:00", "10/11/2026 23:59")]
     assert load_state_data(estado) == {
-        "next_audit_at_v1": "2026-11-01T00:05-03:00",
-        "semanas_avulsas_v1": ["2026-10-11"],
+        "ultimo_dia_v1": "2026-11-05",
+        "dias_avulsos_v1": ["2026-11-10"],
     }
 
 
 @pytest.mark.parametrize(
     "estado_inicial",
-    ['{"semanas_avulsas_v2": ["2026-11-08"]}', '{"ultima_semana_v2": "2026-11-08"}'],
+    [
+        '{"dias_avulsos_v2": ["2026-11-10"]}',
+        '{"ultimo_dia_v2": "2026-11-10"}',
+        '{"semanas_avulsas_v2": ["2026-11-08"]}',
+        '{"ultima_semana_v2": "2026-11-08"}',
+        '{"dias_duvidosos_v2": ["2026-11-10"]}',
+    ],
 )
-def test_forced_rerun_skips_unit_that_already_sent_the_week(estado, estado_inicial, monkeypatch):
+def test_forced_rerun_never_resends_a_day(estado, estado_inicial, monkeypatch):
     estado.write_text(estado_inicial, encoding="utf-8")
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", nao_chamar)
 
-    def fail_if_called(*args, **kwargs):
-        raise AssertionError("week already sent must not be uploaded again")
-
-    monkeypatch.setattr(main, "enviar_afd_para_servidor", fail_if_called)
-    semana = datetime(2026, 11, 8, tzinfo=timezone(timedelta(hours=-3)))
-
-    resultado = processar("V2", fail_if_called, estado, semana_forcada=semana)
+    resultado = processar("V2", nao_chamar, estado, dias_forcados=[date(2026, 11, 10)])
 
     assert resultado.status == "FORA_DA_JANELA"
-    assert "não foi reenviada" in resultado.mensagem
+    assert "nada foi reenviado" in resultado.mensagem
     assert estado.read_text(encoding="utf-8") == estado_inicial
 
 
-def test_forced_week_failed_upload_is_not_recorded(estado, afd, monkeypatch):
+def test_forced_week_sends_only_the_days_not_yet_sent(estado, afd, monkeypatch):
+    estado.write_text('{"dias_avulsos_v1": ["2026-11-09", "2026-11-10"]}', encoding="utf-8")
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", lambda path, unidade: None)
+    periodos = []
+
+    def extrator(inicio, fim):
+        periodos.append(inicio[:5])
+        return afd
+
+    dias = main.dias_da_semana(date(2026, 11, 12))
+    resultado = processar("V1", extrator, estado, dias_forcados=dias)
+
+    assert resultado.status == "OK"
+    assert periodos == ["08/11", "11/11", "12/11", "13/11", "14/11"]
+
+
+def test_forced_day_failed_upload_is_not_recorded(estado, afd, monkeypatch):
     def failed_upload(path, unidade):
         raise RuntimeError("upload failed")
 
     monkeypatch.setattr(main, "enviar_afd_para_servidor", failed_upload)
-    semana = datetime(2026, 11, 8, tzinfo=timezone(timedelta(hours=-3)))
 
-    resultado = processar("V1", lambda inicio, fim: afd, estado, semana_forcada=semana)
+    resultado = processar("V1", lambda inicio, fim: afd, estado, dias_forcados=[date(2026, 11, 10)])
 
     assert resultado.status == "FALHA"
     assert load_state_data(estado) == {}
@@ -217,7 +317,7 @@ def _fake_execucao(status):
 
 def test_failure_exits_with_1_and_writes_json_and_pdf(tmp_path, monkeypatch):
     monkeypatch.setattr(relatorio, "RELATORIOS_DIR", tmp_path)
-    monkeypatch.setattr(main, "executar", lambda semana=None: _fake_execucao("FALHA"))
+    monkeypatch.setattr(main, "executar", lambda dias_forcados=None: _fake_execucao("FALHA"))
     monkeypatch.setattr(main, "enviar_alerta", lambda execucao, pdf: None)
 
     assert main.pipeline_principal() == 1
@@ -230,22 +330,32 @@ def test_failure_exits_with_1_and_writes_json_and_pdf(tmp_path, monkeypatch):
 
 def test_closed_window_exits_0_without_report_or_alert(tmp_path, monkeypatch):
     monkeypatch.setattr(relatorio, "RELATORIOS_DIR", tmp_path)
-    monkeypatch.setattr(main, "executar", lambda semana=None: _fake_execucao("FORA_DA_JANELA"))
+    monkeypatch.setattr(
+        main, "executar", lambda dias_forcados=None: _fake_execucao("FORA_DA_JANELA")
+    )
     monkeypatch.setattr(main, "enviar_alerta", lambda execucao, pdf: pytest.fail("no alert"))
 
     assert main.pipeline_principal() == 0
     assert not list(tmp_path.iterdir())
 
 
-def test_forced_date_becomes_its_sunday(monkeypatch):
+def test_week_option_becomes_sunday_to_saturday():
+    dias = main.dias_da_semana(date(2026, 11, 12))
+    assert dias[0] == date(2026, 11, 8)
+    assert dias[-1] == date(2026, 11, 14)
+    assert len(dias) == 7
+
+
+def test_forced_days_not_closed_yet_are_ignored(monkeypatch):
     recebido = []
     monkeypatch.setattr(
         main,
         "executar",
-        lambda semana=None: recebido.append(semana) or _fake_execucao("FORA_DA_JANELA"),
+        lambda dias_forcados=None: (
+            recebido.append(dias_forcados) or _fake_execucao("FORA_DA_JANELA")
+        ),
     )
 
-    main.pipeline_principal(semana=date(2026, 10, 21))
+    main.pipeline_principal(dias=[date(2026, 11, 15), date(2026, 11, 13)], agora=RUN)
 
-    assert recebido[0].date() == date(2026, 10, 18)
-    assert (recebido[0].hour, recebido[0].minute) == (0, 0)
+    assert recebido == [[date(2026, 11, 13)]]

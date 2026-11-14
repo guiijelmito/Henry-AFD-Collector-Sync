@@ -1,10 +1,9 @@
 ﻿<#
 Registra a coleta de ponto no Agendador de Tarefas do Windows.
 
-Roda TODO DIA às 00:05. O próprio script só coleta quando chega o next_audit_at do
-estado_ponto.json (domingo 00:05, logo depois de a semana fechar no sábado 23:59); nos
-outros dias termina em segundos sem abrir o navegador. Se a coleta de domingo falhar ou
-o PC estiver desligado, as semanas pendentes são enviadas na próxima execução, em ordem.
+Roda TODO DIA às 00:05 e envia o dia anterior (00:00 a 23:59) de cada unidade. Se o PC
+estiver desligado ou a execução falhar, os dias pendentes são enviados na próxima execução,
+em ordem, sem nunca reenviar um dia já enviado (ver docs/REGRAS.md).
 
 Uso (PowerShell como administrador, na pasta do projeto):
     powershell -ExecutionPolicy Bypass -File scripts\agendar_tarefa.ps1
