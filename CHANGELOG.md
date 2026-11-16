@@ -23,6 +23,11 @@ completas ficam em `docs/REGRAS.md` e as decisões em `docs/adr/`.
 - ADR 0001 (`docs/adr/`) sobre a coleta diária sem reenvio.
 - Template de PR com checklist (`.github/pull_request_template.md`).
 
+### Corrigido
+- V1: a batida do dia seguinte que o relógio devolve junto com o período pedido é
+  descartada do arquivo (e registrada no log), em vez de barrar o envio do dia.
+- Download com marcações fora do período não é mais repetido 3 vezes.
+
 ### Migração
 - O estado semanal (`ultima_semana_vX`, `semanas_avulsas_vX`) é lido automaticamente:
   a coleta diária continua no domingo seguinte à última semana enviada, sem reenviar

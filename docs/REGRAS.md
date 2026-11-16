@@ -24,6 +24,11 @@ perdidas. Por isso:
   batida de 23:59 que o relógio ainda esteja gravando.
 - Cada dia vira um arquivo AFD próprio (`AFD_V1_2026-11-14_a_2026-11-14.txt`).
 - Dia sem marcações (domingo, feriado) também é enviado e registrado.
+- O relógio V1 sempre devolve, junto com o dia pedido, a primeira batida seguinte
+  (pedindo 12/11, vem também a primeira batida de 13/11). Essa batida é descartada do
+  arquivo do dia e registrada no log; ela é enviada no arquivo do dia dela. Só batidas
+  **depois** do fim são descartadas: uma batida antes do início continua barrando o envio.
+- Arquivo com batida fora do período não é baixado de novo, porque o resultado se repete.
 
 ## 3. Controle por unidade
 

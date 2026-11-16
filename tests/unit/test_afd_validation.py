@@ -5,6 +5,7 @@ import pytest
 
 from ponto_eletronico.afd_validation import (
     AFDRangeValidationError,
+    descartar_marcacoes_v1_apos_fim,
     preencher_filtro_data_hora,
     preencher_intervalo_data_hora,
     validar_afd_v1_no_intervalo,
@@ -206,3 +207,63 @@ def test_validar_afd_v2_aceita_segundos_dentro_do_ultimo_minuto(tmp_path: Path):
     )
     assert maior == datetime(2026, 10, 23, 23, 59, 30)
     assert quantidade == 1
+
+
+def test_descarta_batida_do_dia_seguinte_que_o_relogio_v1_devolve(tmp_path: Path):
+    path = tmp_path / "v1.afd"
+    path.write_bytes(
+        (
+            _registro_marcacao(1, "12112026", "0750")
+            + "\r\n"
+            + _registro_marcacao(2, "12112026", "1730")
+            + "\r\n"
+            + _registro_marcacao(3, "13112026", "0754")
+            + "\r\n"
+        ).encode("latin-1")
+    )
+    intervalo = ("12/11/2026 00:00", "12/11/2026 23:59")
+
+    descartadas = descartar_marcacoes_v1_apos_fim(path, intervalo)
+
+    assert descartadas == [_registro_marcacao(3, "13112026", "0754")]
+    assert path.read_bytes() == (
+        _registro_marcacao(1, "12112026", "0750")
+        + "\r\n"
+        + _registro_marcacao(2, "12112026", "1730")
+        + "\r\n"
+    ).encode("latin-1")
+    assert validar_afd_v1_no_intervalo(path, intervalo)[2] == 2
+
+
+def test_batida_antes_do_inicio_nao_e_descartada_e_continua_barrada(tmp_path: Path):
+    path = tmp_path / "v1.afd"
+    conteudo = _registro_marcacao(1, "11112026", "2358") + "\n"
+    path.write_text(conteudo, encoding="utf-8")
+    intervalo = ("12/11/2026 00:00", "12/11/2026 23:59")
+
+    assert descartar_marcacoes_v1_apos_fim(path, intervalo) == []
+    assert path.read_text(encoding="utf-8") == conteudo
+    with pytest.raises(AFDRangeValidationError):
+        validar_afd_v1_no_intervalo(path, intervalo)
+
+
+def test_batida_no_ultimo_minuto_do_dia_e_mantida(tmp_path: Path):
+    path = tmp_path / "v1.afd"
+    path.write_text(_registro_marcacao(1, "12112026", "2359") + "\n", encoding="utf-8")
+
+    assert descartar_marcacoes_v1_apos_fim(path, ("12/11/2026 00:00", "12/11/2026 23:59")) == []
+
+
+def test_arquivo_com_trailer_nao_e_alterado(tmp_path: Path):
+    path = tmp_path / "v1.afd"
+    conteudo = (
+        _registro_marcacao(1, "12112026", "0750")
+        + "\n"
+        + _registro_marcacao(2, "13112026", "0754")
+        + "\n"
+        + "9999999990000000000000000020000000000\n"
+    )
+    path.write_text(conteudo, encoding="utf-8")
+
+    assert descartar_marcacoes_v1_apos_fim(path, ("12/11/2026 00:00", "12/11/2026 23:59")) == []
+    assert path.read_text(encoding="utf-8") == conteudo

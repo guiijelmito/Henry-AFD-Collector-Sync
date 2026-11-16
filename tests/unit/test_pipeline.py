@@ -7,6 +7,7 @@ import pytest
 
 from ponto_eletronico import config, relatorio
 from ponto_eletronico import pipeline as main
+from ponto_eletronico.afd_validation import AFDRangeValidationError
 from ponto_eletronico.cloud import UploadRecusado, UploadSemConfirmacao
 from ponto_eletronico.extractors.henry_v2 import TailnetConnectionError
 from ponto_eletronico.state_store import load_state_data
@@ -290,6 +291,20 @@ def test_temporary_download_failure_is_retried(estado, afd, monkeypatch):
 
     assert processar("V1", unstable_download, estado).status == "OK"
     assert len(attempts) == 3
+
+
+def test_afd_fora_do_intervalo_nao_e_baixado_de_novo(estado, monkeypatch):
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", nao_chamar)
+    attempts = []
+
+    def download_invalido(inicio, fim):
+        attempts.append(1)
+        raise AFDRangeValidationError("1 marcação(ões) fora do intervalo solicitado")
+
+    resultado = processar("V1", download_invalido, estado)
+
+    assert resultado.status != "OK"
+    assert len(attempts) == 1
 
 
 def test_upload_failure_after_all_attempts_explains_what_to_do(estado, afd, monkeypatch):

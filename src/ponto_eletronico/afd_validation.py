@@ -82,6 +82,48 @@ def validar_afd_v1_no_intervalo(
     return _validar_marcacoes_no_intervalo(marcacoes, intervalo)
 
 
+def descartar_marcacoes_v1_apos_fim(
+    caminho: str | Path,
+    intervalo: tuple[str, str],
+) -> list[str]:
+    """Remove do arquivo V1 as marcações gravadas depois do fim do intervalo.
+
+    O relógio V1 sempre devolve, junto com o período pedido, o primeiro registro
+    seguinte (ex.: pedindo 12/11, vem também a primeira batida de 13/11). Essa
+    batida pertence ao arquivo do dia seguinte, onde é enviada normalmente.
+
+    Só marcações depois do fim são descartadas; uma marcação antes do início
+    continua sendo erro e é barrada pela validação. O layout V1 não tem trailer
+    com contagem, mas, se aparecer um, o arquivo não é alterado e a validação
+    barra o envio. Devolve as linhas descartadas.
+    """
+    fim = datetime.strptime(intervalo[1], "%d/%m/%Y %H:%M") + timedelta(seconds=59)
+    arquivo = Path(caminho)
+    # latin-1 preserva qualquer byte do arquivo ao regravar
+    linhas = arquivo.read_bytes().decode("latin-1").splitlines(keepends=True)
+
+    mantidas: list[str] = []
+    descartadas: list[str] = []
+    for linha in linhas:
+        if len(linha) >= 22 and linha[:9].isdigit() and linha[9] == "3":
+            try:
+                marcacao = datetime.strptime(f"{linha[10:18]} {linha[18:22]}", "%d%m%Y %H%M")
+            except ValueError:
+                marcacao = None
+            if marcacao is not None and marcacao > fim:
+                descartadas.append(linha.rstrip("\r\n"))
+                continue
+        mantidas.append(linha)
+
+    if not descartadas:
+        return []
+    if any(linha.startswith("999999999") for linha in mantidas):
+        return []
+
+    arquivo.write_bytes("".join(mantidas).encode("latin-1"))
+    return descartadas
+
+
 def validar_afd_v2_no_intervalo(
     caminho: str | Path,
     intervalo: tuple[str, str],

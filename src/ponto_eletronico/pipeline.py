@@ -19,6 +19,7 @@ from .logging_config import SCREENSHOT_DIR, setup_logging
 setup_logging()  # antes dos demais módulos do projeto emitirem logs
 
 from . import config, relatorio  # noqa: E402
+from .afd_validation import AFDRangeValidationError  # noqa: E402
 from .alertas import enviar_alerta  # noqa: E402
 from .cloud import UploadSemConfirmacao, enviar_afd_para_servidor  # noqa: E402
 from .extractors.henry_v1 import automatizar_download_afd_v1  # noqa: E402
@@ -72,8 +73,11 @@ def _baixar_e_enviar(unidade, versao, dia, funcao_extracao, arquivo_estado, resu
     logger.info("[%s] Dia %s", unidade, dia.strftime("%d/%m/%Y"))
 
     resultado.etapa = "download"
+    # Arquivo com marcações fora do período não melhora baixando de novo
     caminho_afd = _com_tentativas(
-        f"Download {unidade}", lambda: funcao_extracao(data_inicial, data_final)
+        f"Download {unidade}",
+        lambda: funcao_extracao(data_inicial, data_final),
+        nao_repetir=(AFDRangeValidationError,),
     )
     if not caminho_afd or not os.path.exists(caminho_afd):
         raise relatorio.ArquivoInvalido(f"O download da {unidade} não gerou arquivo.")
