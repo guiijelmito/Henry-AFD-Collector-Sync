@@ -37,8 +37,15 @@ $config = New-ScheduledTaskSettingsSet `
 $usuario = "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId $usuario -LogonType S4U -RunLevel Limited
 
-Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho `
-    -Settings $config -Principal $principal -Force | Out-Null
+try {
+    Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho `
+        -Settings $config -Principal $principal -Force -ErrorAction Stop | Out-Null
+} catch {
+    Write-Host "ERRO: a tarefa '$NomeTarefa' NÃO foi registrada: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Rode o PowerShell como administrador ou crie a tarefa pelo Agendador de Tarefas"
+    Write-Host "marcando 'Executar estando o usuário conectado ou não'."
+    exit 1
+}
 
 Write-Host "Tarefa '$NomeTarefa' registrada: todo dia às $Horario, como $usuario."
 Write-Host "Testar agora:  Start-ScheduledTask -TaskName '$NomeTarefa'"
