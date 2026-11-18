@@ -9,7 +9,7 @@ completas ficam em `docs/REGRAS.md` e as decisões em `docs/adr/`.
 ### Alterado
 - A coleta passa a ser diária: cada execução envia o dia anterior (00:00 a 23:59),
   em vez da semana de domingo a sábado.
-- A tarefa diária roda às 14:30, com o usuário conectado ou não (ADR 0002).
+- A tarefa diária roda às 08:30, com o usuário conectado ou não (ADR 0002).
 - `--semana` agora envia os dias da semana, um a um, pulando os dias já enviados.
 - `MAX_SEMANAS_POR_EXECUCAO` foi trocado por `MAX_DIAS_POR_EXECUCAO` (padrão 7).
 

@@ -11,7 +11,7 @@ Automated Python service that extracts **AFD (Arquivo Fonte de Dados)** files fr
 ## 🚀 Key Features
 
 - **Resilient Web Automation:** Uses Playwright to interact with Henry's web panel, handling authentication, sessions, and precise element selectors.
-- **Closed-day collection:** Every day at 14:30, downloads the previous day, 00:00 to 23:59, one AFD per day and unit. Missed days are recovered in order, per unit (up to `MAX_DIAS_POR_EXECUCAO`, default 7, per run). A day already sent is never sent again, because the panel overwrites records. See [`docs/REGRAS.md`](docs/REGRAS.md).
+- **Closed-day collection:** Every day at 08:30, downloads the previous day, 00:00 to 23:59, one AFD per day and unit. Missed days are recovered in order, per unit (up to `MAX_DIAS_POR_EXECUCAO`, default 7, per run). A day already sent is never sent again, because the panel overwrites records. See [`docs/REGRAS.md`](docs/REGRAS.md).
 - **Sent-days control (`estado_ponto.json`):** Keeps, per unit, the last day sent, days sent outside the schedule, and days whose upload had no confirmation.
 - **Secure Configuration:** Isolates sensitive credentials and device IPs using environment variables (`.env`).
 - **Structured Storage:** Automatically saves extracted AFD files into a dedicated target directory (`afd_downloads/`).
@@ -74,7 +74,7 @@ sent outside it. Business rules (in Portuguese) are in [`docs/REGRAS.md`](docs/R
 }
 ```
 
-The task runs every day at 14:30 and sends each closed day (00:00 to 23:59) after
+The task runs every day at 08:30 and sends each closed day (00:00 to 23:59) after
 `ultimo_dia_v1/v2`, oldest first, up to `MAX_DIAS_POR_EXECUCAO` days per run. The
 panel overwrites records and they are corrected by hand after upload, so **a day that
 was already sent is never sent again**. A day only counts as sent when the panel
@@ -163,7 +163,7 @@ Run once, in an administrator PowerShell, from the project folder:
 powershell -ExecutionPolicy Bypass -File scripts\agendar_tarefa.ps1
 ```
 
-The task runs every day at 14:30, as the logged-in user or not (S4U), and sends the previous day. It wakes the PC
+The task runs every day at 08:30, as the logged-in user or not (S4U), and sends the previous day. It wakes the PC
 (`-WakeToRun`) and runs as soon as possible after a missed start (`-StartWhenAvailable`).
 If a run fails or the PC is off, the next run sends the days still pending, in order.
 
