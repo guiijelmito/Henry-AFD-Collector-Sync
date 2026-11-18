@@ -82,3 +82,31 @@ def test_day_option_is_passed_to_the_pipeline(cli, monkeypatch):
 
     assert main(["--dia", "2026-11-12", "--dia", "2026-11-13"]) == 0
     assert recebido == [[date(2026, 11, 12), date(2026, 11, 13)]]
+
+
+def test_mark_manual_uploads_for_both_units(cli):
+    main, estado = cli
+    estado.write_text('{"dias_duvidosos_v2": ["2026-11-09"]}', encoding="utf-8")
+
+    codigo = main(
+        ["--marcar-enviado", "2026-11-09", "--marcar-enviado", "2026-11-08", "--unidade", "todas"]
+    )
+
+    assert codigo == 0
+    assert json.loads(estado.read_text("utf-8")) == {
+        "dias_duvidosos_v2": ["2026-11-09"],  # duvidoso continua pedindo conferência
+        "dias_avulsos_v1": ["2026-11-08", "2026-11-09"],
+        "dias_avulsos_v2": ["2026-11-08"],
+    }
+
+
+def test_mark_manual_upload_requires_unit(cli):
+    main, _ = cli
+    with pytest.raises(SystemExit):
+        main(["--marcar-enviado", "2026-11-08"])
+
+
+def test_resolve_doubtful_does_not_accept_all_units(cli):
+    main, _ = cli
+    with pytest.raises(SystemExit):
+        main(["--resolver-duvidoso", "2026-11-08", "--unidade", "todas", "--esta-no-painel", "sim"])

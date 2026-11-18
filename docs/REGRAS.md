@@ -111,6 +111,18 @@ executar.bat --semana 2026-11-08
 - Não mexem na fila agendada (`ultimo_dia_vX`); os dias enviados vão para
   `dias_avulsos_vX`.
 
+### Dias enviados à mão no painel
+
+Se alguém enviar um dia direto pelo painel, registre isso no estado para que a
+coleta nunca envie esse dia de novo:
+
+```bat
+executar.bat --marcar-enviado 2026-11-08 --marcar-enviado 2026-11-09 --unidade todas
+```
+
+`--unidade` aceita `V1`, `V2` ou `todas`. O dia vai para `dias_avulsos_vX`, e a fila
+agendada passa por ele sem enviá-lo. O comando não baixa nem envia nada.
+
 ## 7. Falhas, código de saída e alertas
 
 - Qualquer falha numa unidade termina a execução com código de saída 1.

@@ -20,6 +20,8 @@ completas ficam em `docs/REGRAS.md` e as decisões em `docs/adr/`.
 - Dias com envio sem confirmação ficam em `dias_duvidosos_vX`, param a fila da unidade
   e geram alerta até serem resolvidos com `--resolver-duvidoso`.
 - Opção `--dia AAAA-MM-DD` para enviar dias específicos.
+- Opção `--marcar-enviado AAAA-MM-DD --unidade V1|V2|todas` para registrar dias
+  enviados à mão no painel.
 - `docs/REGRAS.md` com as regras de negócio e o histórico de decisões.
 - ADR 0001 (`docs/adr/`) sobre a coleta diária sem reenvio e ADR 0002 sobre o horário.
 - Template de PR com checklist (`.github/pull_request_template.md`).
