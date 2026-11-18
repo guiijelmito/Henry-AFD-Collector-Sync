@@ -110,3 +110,16 @@ def test_resolve_doubtful_does_not_accept_all_units(cli):
     main, _ = cli
     with pytest.raises(SystemExit):
         main(["--resolver-duvidoso", "2026-11-08", "--unidade", "todas", "--esta-no-painel", "sim"])
+
+
+def test_queue_start_for_one_unit(cli):
+    main, estado = cli
+    assert main(["--inicio-fila", "2026-11-08", "--unidade", "V1"]) == 0
+    assert json.loads(estado.read_text("utf-8")) == {"ultimo_dia_v1": "2026-11-07"}
+
+
+def test_queue_start_refuses_to_move_back(cli):
+    main, estado = cli
+    estado.write_text('{"ultimo_dia_v1": "2026-11-17"}', encoding="utf-8")
+    assert main(["--inicio-fila", "2026-11-08", "--unidade", "V1"]) == 2
+    assert json.loads(estado.read_text("utf-8")) == {"ultimo_dia_v1": "2026-11-17"}

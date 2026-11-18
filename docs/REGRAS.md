@@ -123,6 +123,19 @@ executar.bat --marcar-enviado 2026-11-08 --marcar-enviado 2026-11-09 --unidade t
 `--unidade` aceita `V1`, `V2` ou `todas`. O dia vai para `dias_avulsos_vX`, e a fila
 agendada passa por ele sem enviá-lo. O comando não baixa nem envia nada.
 
+### Definir o início da fila de uma unidade
+
+Sem `ultimo_dia_vX` nem `ultima_semana_vX`, a fila da unidade começa em ontem. Para
+fazê-la começar num dia anterior, e assim recuperar dias que ainda não foram enviados:
+
+```bat
+executar.bat --inicio-fila 2026-11-08 --unidade V1
+```
+
+O comando só avança a fila, nunca a faz voltar, porque voltar tiraria a proteção dos
+dias já enviados. Os dias a partir da data informada continuam sendo conferidos um a
+um, e os que estão em `dias_avulsos_vX` são pulados.
+
 ## 7. Falhas, código de saída e alertas
 
 - Qualquer falha numa unidade termina a execução com código de saída 1.

@@ -18,6 +18,7 @@ from ponto_eletronico.state_store import (
     record_scheduled_day,
     resolve_doubtful_day,
     sent_status,
+    set_queue_start,
 )
 
 TZ = timezone(timedelta(hours=-3))
@@ -186,3 +187,24 @@ def test_failed_temporary_write_preserves_existing_state(tmp_path, monkeypatch):
 def test_unknown_version_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="desconhecida"):
         pending_days(tmp_path / "state.json", "v3", RUN)
+
+
+def test_queue_start_on_empty_unit_recovers_from_that_day(tmp_path):
+    state_path = tmp_path / "s.json"
+    write(state_path, {"dias_avulsos_v1": ["2026-11-12", "2026-11-13"]})
+
+    set_queue_start(state_path, "v1", date(2026, 11, 12))
+
+    assert load_state_data(state_path)["ultimo_dia_v1"] == "2026-11-11"
+    assert pending_days(state_path, "v1", RUN)[0] == date(2026, 11, 12)
+    assert sent_status(state_path, "v1", date(2026, 11, 12)) == ENVIADO_AVULSO
+
+
+def test_queue_start_never_moves_back(tmp_path):
+    state_path = tmp_path / "s.json"
+    write(state_path, {"ultima_semana_v2": "2026-11-01"})  # enviado até 07/11
+
+    with pytest.raises(ValueError, match="voltar a fila"):
+        set_queue_start(state_path, "v2", date(2026, 11, 5))
+    set_queue_start(state_path, "v2", date(2026, 11, 8))
+    assert load_state_data(state_path)["ultimo_dia_v2"] == "2026-11-07"

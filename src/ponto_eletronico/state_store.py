@@ -156,6 +156,25 @@ def pending_days(
     return days
 
 
+def set_queue_start(path: str | Path, version: str, first_day: date) -> None:
+    """Define o primeiro dia que a fila agendada da unidade vai considerar.
+
+    Só avança a fila: voltar o ``ultimo_dia`` tiraria a proteção de dias já enviados.
+    Os dias a partir de ``first_day`` continuam sendo conferidos um a um antes do envio.
+    """
+    _check_version(version)
+    data = load_state_data(path)
+    new_last = first_day - timedelta(days=1)
+    current = _last_scheduled_day(data, version)
+    if current is not None and new_last < current:
+        raise ValueError(
+            f"A fila da unidade {version.upper()} já está em {current.isoformat()}; "
+            "voltar a fila poderia reenviar dias"
+        )
+    data[f"ultimo_dia_{version}"] = new_last.isoformat()
+    write_state_data(path, data)
+
+
 def record_scheduled_day(path: str | Path, version: str, day: date) -> None:
     """Avança a fila agendada até o dia informado (enviado ou já enviado antes)."""
     _check_version(version)

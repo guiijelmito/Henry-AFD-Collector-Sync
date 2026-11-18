@@ -6,6 +6,7 @@ Uso:
     python main.py --semana 2026-11-08   # força os dias da semana (domingo a sábado)
     python main.py --resolver-duvidoso 2026-11-12 --unidade V1 --esta-no-painel sim
     python main.py --marcar-enviado 2026-11-08 --marcar-enviado 2026-11-09 --unidade todas
+    python main.py --inicio-fila 2026-11-08 --unidade V1
 
 Regras completas em docs/REGRAS.md.
 """
@@ -52,6 +53,12 @@ def _criar_parser() -> argparse.ArgumentParser:
         metavar="AAAA-MM-DD",
         help="registra um dia enviado à mão no painel, para nunca ser enviado; pode repetir",
     )
+    grupo.add_argument(
+        "--inicio-fila",
+        type=date.fromisoformat,
+        metavar="AAAA-MM-DD",
+        help="primeiro dia que a coleta agendada da unidade deve considerar (só avança)",
+    )
     parser.add_argument(
         "--unidade",
         choices=["V1", "V2", "todas"],
@@ -86,6 +93,21 @@ def main(argv=None) -> int:
                     continue
                 record_extra_day(config.ARQUIVO_ESTADO, unidade.lower(), dia)
                 print(f"{dia} da {unidade}: registrado como enviado; nunca será enviado.")
+        return 0
+
+    if args.inicio_fila is not None:
+        if args.unidade is None:
+            parser.error("--inicio-fila exige --unidade (V1, V2 ou todas)")
+        from ponto_eletronico import config
+        from ponto_eletronico.state_store import set_queue_start
+
+        for unidade in ["V1", "V2"] if args.unidade == "todas" else [args.unidade]:
+            try:
+                set_queue_start(config.ARQUIVO_ESTADO, unidade.lower(), args.inicio_fila)
+            except ValueError as exc:
+                print(f"Erro: {exc}")
+                return 2
+            print(f"Fila da {unidade} começa em {args.inicio_fila} (dias já enviados são pulados).")
         return 0
 
     if args.resolver_duvidoso is not None:
