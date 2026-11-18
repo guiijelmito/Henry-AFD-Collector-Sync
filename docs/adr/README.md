@@ -6,4 +6,5 @@ decisão mudar, crie um novo ADR que substitui o anterior e atualize o status do
 
 | ADR | Título | Status |
 |---|---|---|
-| [0001](0001-coleta-diaria-sem-reenvio.md) | Coleta diária do dia fechado, sem reenvio de dias | aceito |
+| [0001](0001-coleta-diaria-sem-reenvio.md) | Coleta diária do dia fechado, sem reenvio de dias | aceito (horário alterado pelo 0002) |
+| [0002](0002-horario-14h30.md) | Coleta diária às 14:30 | aceito |

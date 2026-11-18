@@ -1,7 +1,7 @@
 ﻿<#
 Registra a coleta de ponto no Agendador de Tarefas do Windows.
 
-Roda TODO DIA às 00:05 e envia o dia anterior (00:00 a 23:59) de cada unidade. Se o PC
+Roda TODO DIA às 14:30 e envia o dia anterior (00:00 a 23:59) de cada unidade. Se o PC
 estiver desligado ou a execução falhar, os dias pendentes são enviados na próxima execução,
 em ordem, sem nunca reenviar um dia já enviado (ver docs/REGRAS.md).
 
@@ -10,7 +10,7 @@ Uso (PowerShell como administrador, na pasta do projeto):
 #>
 param(
     [string]$NomeTarefa = "Coleta Ponto Eletronico",
-    [string]$Horario = "00:05"
+    [string]$Horario = "14:30"
 )
 
 $ErrorActionPreference = "Stop"

@@ -18,10 +18,12 @@ perdidas. Por isso:
 
 ## 2. O que é enviado: o dia fechado
 
-- A coleta roda **todo dia às 00:05** (Agendador de Tarefas do Windows).
+- A coleta roda **todo dia às 14:30** (Agendador de Tarefas do Windows), com o
+  usuário conectado ou não. Ver [ADR 0002](adr/0002-horario-14h30.md).
 - Cada execução envia o **dia anterior**, das 00:00 às 23:59.
 - Um dia só é considerado fechado 2 minutos depois da meia-noite, para não pegar uma
-  batida de 23:59 que o relógio ainda esteja gravando.
+  batida de 23:59 que o relógio ainda esteja gravando. O horário de 14:30 não muda
+  isso: o dia de hoje nunca é enviado, só os dias anteriores.
 - Cada dia vira um arquivo AFD próprio (`AFD_V1_2026-11-14_a_2026-11-14.txt`).
 - Dia sem marcações (domingo, feriado) também é enviado e registrado.
 - O relógio V1 sempre devolve, junto com o dia pedido, a primeira batida seguinte
@@ -125,3 +127,4 @@ executar.bat --semana 2026-11-08
 | 14/11/2026 | O painel sobrescreve os registros e as correções manuais são feitas depois do envio: nenhum dia pode ser reenviado. |
 | 14/11/2026 | A coleta passa a ser diária, às 00:05, enviando só o dia anterior (dia fechado). Ver [ADR 0001](adr/0001-coleta-diaria-sem-reenvio.md). |
 | 14/11/2026 | O envio só conta com HTTP 200; sem resposta, o dia fica duvidoso e não é reenviado sem conferência. |
+| 18/11/2026 | O horário da coleta diária passa de 00:05 para 14:30, com a tarefa rodando com o usuário conectado ou não. Ver [ADR 0002](adr/0002-horario-14h30.md). |

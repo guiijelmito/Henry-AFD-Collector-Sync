@@ -9,6 +9,7 @@ completas ficam em `docs/REGRAS.md` e as decisões em `docs/adr/`.
 ### Alterado
 - A coleta passa a ser diária: cada execução envia o dia anterior (00:00 a 23:59),
   em vez da semana de domingo a sábado.
+- A tarefa diária roda às 14:30, com o usuário conectado ou não (ADR 0002).
 - `--semana` agora envia os dias da semana, um a um, pulando os dias já enviados.
 - `MAX_SEMANAS_POR_EXECUCAO` foi trocado por `MAX_DIAS_POR_EXECUCAO` (padrão 7).
 
@@ -20,7 +21,7 @@ completas ficam em `docs/REGRAS.md` e as decisões em `docs/adr/`.
   e geram alerta até serem resolvidos com `--resolver-duvidoso`.
 - Opção `--dia AAAA-MM-DD` para enviar dias específicos.
 - `docs/REGRAS.md` com as regras de negócio e o histórico de decisões.
-- ADR 0001 (`docs/adr/`) sobre a coleta diária sem reenvio.
+- ADR 0001 (`docs/adr/`) sobre a coleta diária sem reenvio e ADR 0002 sobre o horário.
 - Template de PR com checklist (`.github/pull_request_template.md`).
 
 ### Corrigido
