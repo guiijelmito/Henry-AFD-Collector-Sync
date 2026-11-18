@@ -136,7 +136,7 @@ def pending_days(
     path: str | Path,
     version: str,
     now: datetime | None = None,
-    limit: int = 7,
+    limit: int | None = None,
 ) -> list[date]:
     """Dias fechados da fila agendada da unidade, em ordem, a partir do último enviado.
 
@@ -150,7 +150,7 @@ def pending_days(
     day = yesterday if last_scheduled is None else last_scheduled + timedelta(days=1)
 
     days = []
-    while day <= yesterday and len(days) < limit:
+    while day <= yesterday and (limit is None or len(days) < limit):
         days.append(day)
         day += timedelta(days=1)
     return days

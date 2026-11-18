@@ -33,6 +33,10 @@ completas ficam em `docs/REGRAS.md` e as decisões em `docs/adr/`.
   descartada do arquivo (e registrada no log), em vez de barrar o envio do dia.
 - Download com marcações fora do período não é mais repetido 3 vezes.
 
+### Corrigido
+- O limite `MAX_DIAS_POR_EXECUCAO` contava também os dias pulados por já terem sido
+  enviados, o que podia travar a recuperação. Agora ele conta só os dias enviados.
+
 ### Migração
 - O estado semanal (`ultima_semana_vX`, `semanas_avulsas_vX`) é lido automaticamente:
   a coleta diária continua no domingo seguinte à última semana enviada, sem reenviar

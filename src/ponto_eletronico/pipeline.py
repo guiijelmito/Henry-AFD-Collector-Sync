@@ -120,17 +120,21 @@ def _processar_unidade(
     try:
         resultado.etapa = "estado"
         forcado = dias_forcados is not None
-        dias = (
-            list(dias_forcados)
-            if forcado
-            else pending_days(arquivo_estado, versao, agora, config.MAX_DIAS_POR_EXECUCAO)
-        )
+        dias = list(dias_forcados) if forcado else pending_days(arquivo_estado, versao, agora)
         if not dias:
             logger.info("Unidade %s sem dia fechado pendente", unidade)
             resultado.status = FORA_DA_JANELA
             return resultado
 
         for dia in dias:
+            if not forcado and enviados >= config.MAX_DIAS_POR_EXECUCAO:
+                # O limite conta só dias enviados; dias já enviados não gastam o limite
+                logger.info(
+                    "Unidade %s: limite de %d dia(s) por execução; o restante fica para a próxima",
+                    unidade,
+                    config.MAX_DIAS_POR_EXECUCAO,
+                )
+                break
             resultado.etapa = "estado"
             motivo = sent_status(arquivo_estado, versao, dia)
             if motivo == DUVIDOSO and not forcado:

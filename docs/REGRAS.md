@@ -62,7 +62,8 @@ Exemplo:
 Se o PC ficar desligado ou uma execução falhar, a próxima execução envia, **por
 unidade e em ordem**, todos os dias fechados depois do `ultimo_dia_vX`:
 
-- até `MAX_DIAS_POR_EXECUCAO` dias por execução (padrão 7); o resto fica para a próxima;
+- até `MAX_DIAS_POR_EXECUCAO` dias **enviados** por execução (padrão 7); o resto fica
+  para a próxima. Dias pulados por já terem sido enviados não contam nesse limite;
 - um dia que já foi enviado por outro caminho (avulso ou pela coleta semanal antiga)
   é pulado, e a fila avança;
 - sem nenhum registro da unidade, começa em ontem e não tenta adivinhar dias antigos.

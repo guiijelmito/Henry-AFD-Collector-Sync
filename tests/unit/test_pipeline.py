@@ -374,3 +374,41 @@ def test_forced_days_not_closed_yet_are_ignored(monkeypatch):
     main.pipeline_principal(dias=[date(2026, 11, 15), date(2026, 11, 13)], agora=RUN)
 
     assert recebido == [[date(2026, 11, 13)]]
+
+
+def test_days_already_sent_do_not_use_the_per_run_limit(estado, afd, monkeypatch):
+    # Caso real de 18/11: 08 a 14/11 já enviados à mão; o limite de 7 não pode parar a fila
+    estado.write_text(
+        json.dumps(
+            {
+                "ultimo_dia_v1": "2026-11-07",
+                "dias_avulsos_v1": [f"2026-11-{d:02d}" for d in range(8, 15)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "MAX_DIAS_POR_EXECUCAO", 7)
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", lambda path, unidade: None)
+    periodos = []
+
+    def extrator(inicio, fim):
+        periodos.append(inicio[:5])
+        return afd
+
+    agora = datetime(2026, 11, 18, 8, 30, tzinfo=TZ)
+    resultado = processar("V1", extrator, estado, agora=agora)
+
+    assert periodos == ["15/11", "16/11", "17/11"]
+    assert load_state_data(estado)["ultimo_dia_v1"] == "2026-11-17"
+    assert resultado.mensagem.startswith("3 dia(s)")
+
+
+def test_per_run_limit_counts_only_days_sent(estado, afd, monkeypatch):
+    estado.write_text('{"ultimo_dia_v1": "2026-11-09"}', encoding="utf-8")
+    monkeypatch.setattr(config, "MAX_DIAS_POR_EXECUCAO", 2)
+    monkeypatch.setattr(main, "enviar_afd_para_servidor", lambda path, unidade: None)
+
+    resultado = processar("V1", lambda inicio, fim: afd, estado)
+
+    assert resultado.mensagem.startswith("2 dia(s)")
+    assert load_state_data(estado)["ultimo_dia_v1"] == "2026-11-11"
