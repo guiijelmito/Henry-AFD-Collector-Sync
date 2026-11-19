@@ -8,7 +8,11 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from ..afd_validation import preencher_intervalo_data_hora, validar_afd_v1_no_intervalo
+from ..afd_validation import (
+    descartar_marcacoes_v1_apos_fim,
+    preencher_intervalo_data_hora,
+    validar_afd_v1_no_intervalo,
+)
 from ..config import (
     DIRETORIO_DOWNLOADS,
     HEADLESS_MODE,
@@ -133,6 +137,17 @@ def automatizar_download_afd_v1(data_inicial: str, data_final: str) -> str:
                 download = download_info.value
                 logger.debug("Download recebido | sugerido=%s", download.suggested_filename)
                 download.save_as(caminho_salvo)
+                descartadas = descartar_marcacoes_v1_apos_fim(
+                    caminho_salvo,
+                    (data_inicial, data_final),
+                )
+                if descartadas:
+                    logger.warning(
+                        "Relógio V1 devolveu %d marcação(ões) depois do fim do período; "
+                        "descartadas deste arquivo (entram no arquivo do dia seguinte): %s",
+                        len(descartadas),
+                        " | ".join(descartadas),
+                    )
                 menor, maior, quantidade = validar_afd_v1_no_intervalo(
                     caminho_salvo,
                     (data_inicial, data_final),

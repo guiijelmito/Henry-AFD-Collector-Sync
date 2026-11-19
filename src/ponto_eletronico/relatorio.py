@@ -13,8 +13,9 @@ from pathlib import Path
 from fpdf import FPDF
 
 from .afd_validation import AFDRangeValidationError
+from .cloud import UploadRecusado, UploadSemConfirmacao
 from .logging_config import LOG_DIR, LOG_FILE
-from .state_store import StateIntegrityError
+from .state_store import DiaDuvidosoPendente, StateIntegrityError
 
 RELATORIOS_DIR = LOG_DIR / "relatorios"
 
@@ -46,9 +47,7 @@ class ResultadoUnidade:
     o_que_fazer: str = ""
     erro_tecnico: str = ""
     etapa: str = ""
-    periodo: str = ""
-    arquivo: str = ""
-    enviado: bool = False
+    dias: list[str] = field(default_factory=list)
     duracao_s: float = 0.0
 
 
@@ -111,8 +110,29 @@ def interpretar_erro(exc, etapa, unidade):
     if isinstance(exc, StateIntegrityError):
         return (
             "O arquivo estado_ponto.json está corrompido.",
-            "Abra o estado_ponto.json e corrija as datas next_audit_at e collected_until "
-            "(formato 2026-10-30T23:59-03:00) ou restaure um backup.",
+            "Abra o estado_ponto.json e corrija as datas (formato 2026-11-14) ou restaure "
+            "um backup. Veja docs/REGRAS.md.",
+        )
+    if isinstance(exc, UploadSemConfirmacao):
+        return (
+            f"O envio de um dia da {unidade} ficou sem confirmação do painel. O dia foi "
+            "travado e NÃO será reenviado automaticamente, para não apagar correções.",
+            "Confira no painel se as marcações desse dia chegaram. Depois rode "
+            f"'executar.bat --resolver-duvidoso AAAA-MM-DD --unidade {unidade} "
+            "--esta-no-painel sim' (ou 'nao'). Enquanto isso, a unidade fica parada nesse dia.",
+        )
+    if isinstance(exc, DiaDuvidosoPendente):
+        return (
+            f"{exc}. A coleta da {unidade} está parada até essa conferência.",
+            "Confira no painel se as marcações desse dia chegaram. Depois rode "
+            f"'executar.bat --resolver-duvidoso AAAA-MM-DD --unidade {unidade} "
+            "--esta-no-painel sim' (ou 'nao'). Os dias seguintes são recuperados depois.",
+        )
+    if isinstance(exc, UploadRecusado):
+        return (
+            "O painel recusou o arquivo (nada foi gravado).",
+            "Se o erro foi HTTP 401, a sessão expirou: teste o login no painel pelo navegador. "
+            "O dia será tentado de novo na próxima execução.",
         )
     if isinstance(exc, OSError) and "ausente" in texto:
         return (
@@ -127,7 +147,7 @@ def interpretar_erro(exc, etapa, unidade):
         )
     if isinstance(exc, AFDRangeValidationError):
         return (
-            f"O AFD da {unidade} veio sem marcações da semana ou com marcações fora dela.",
+            f"O AFD da {unidade} veio com marcações fora do dia pedido.",
             "Baixe o AFD manualmente no relógio pelo filtro de data/hora e confira o período.",
         )
     if etapa == "download":
@@ -231,11 +251,7 @@ def gerar_pdf(execucao, destino=None):
             linhas.append(u.mensagem)
         if u.o_que_fazer:
             linhas.append(f"O que fazer: {u.o_que_fazer}")
-        if u.periodo:
-            linhas.append(f"Período coletado: {u.periodo}")
-        if u.arquivo:
-            situacao = "enviado" if u.enviado else "não enviado"
-            linhas.append(f"Arquivo: {Path(u.arquivo).name} ({situacao})")
+        linhas += [f"Dia {dia}" for dia in u.dias]
         if u.duracao_s:
             linhas.append(f"Duração: {u.duracao_s:.0f}s")
         if u.erro_tecnico:

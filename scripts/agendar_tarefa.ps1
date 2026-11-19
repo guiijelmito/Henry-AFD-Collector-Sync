@@ -1,17 +1,16 @@
 ﻿<#
 Registra a coleta de ponto no Agendador de Tarefas do Windows.
 
-Roda TODO DIA às 23:59. O próprio script só coleta quando chega o next_audit_at do
-estado_ponto.json (ex.: sexta 23:59); nos outros dias termina em segundos sem abrir o
-navegador. Se a coleta de sexta falhar ou o PC estiver desligado, ela acontece no dia
-seguinte, começando de onde a última coleta parou, sem perder marcações.
+Roda TODO DIA às 08:30 e envia o dia anterior (00:00 a 23:59) de cada unidade. Se o PC
+estiver desligado ou a execução falhar, os dias pendentes são enviados na próxima execução,
+em ordem, sem nunca reenviar um dia já enviado (ver docs/REGRAS.md).
 
 Uso (PowerShell como administrador, na pasta do projeto):
     powershell -ExecutionPolicy Bypass -File scripts\agendar_tarefa.ps1
 #>
 param(
     [string]$NomeTarefa = "Coleta Ponto Eletronico",
-    [string]$Horario = "23:59"
+    [string]$Horario = "08:30"
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,8 +37,15 @@ $config = New-ScheduledTaskSettingsSet `
 $usuario = "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId $usuario -LogonType S4U -RunLevel Limited
 
-Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho `
-    -Settings $config -Principal $principal -Force | Out-Null
+try {
+    Register-ScheduledTask -TaskName $NomeTarefa -Action $acao -Trigger $gatilho `
+        -Settings $config -Principal $principal -Force -ErrorAction Stop | Out-Null
+} catch {
+    Write-Host "ERRO: a tarefa '$NomeTarefa' NÃO foi registrada: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Rode o PowerShell como administrador ou crie a tarefa pelo Agendador de Tarefas"
+    Write-Host "marcando 'Executar estando o usuário conectado ou não'."
+    exit 1
+}
 
 Write-Host "Tarefa '$NomeTarefa' registrada: todo dia às $Horario, como $usuario."
 Write-Host "Testar agora:  Start-ScheduledTask -TaskName '$NomeTarefa'"

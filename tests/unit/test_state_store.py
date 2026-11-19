@@ -1,103 +1,145 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
 from ponto_eletronico.state_store import (
+    DUVIDOSO,
+    ENVIADO_AGENDADO,
+    ENVIADO_AVULSO,
+    ENVIADO_SEMANA_ANTIGA,
     StateIntegrityError,
-    audit_date_range,
-    is_audit_due,
+    day_range,
+    doubtful_days,
     load_state_data,
-    record_audit_upload,
+    pending_days,
+    record_doubtful_day,
+    record_extra_day,
+    record_scheduled_day,
+    resolve_doubtful_day,
+    sent_status,
+    set_queue_start,
 )
 
 TZ = timezone(timedelta(hours=-3))
-FRIDAY = datetime(2026, 10, 23, 23, 59, tzinfo=TZ)
+# Domingo 15/11/2026 às 00:05: o dia fechado mais recente é sábado 14/11
+RUN = datetime(2026, 11, 15, 0, 5, tzinfo=TZ)
 
 
 def write(path, data):
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def test_first_collection_goes_from_monday_to_now_including_friday(tmp_path):
-    assert audit_date_range(tmp_path / "missing.json", "v1", FRIDAY) == (
-        "19/10/2026 00:00",
-        "23/10/2026 23:59",
-    )
+def test_day_range_goes_from_00_00_to_23_59():
+    assert day_range(date(2026, 11, 14)) == ("14/11/2026 00:00", "14/11/2026 23:59")
 
 
-def test_next_collection_starts_where_the_last_upload_stopped(tmp_path):
-    state_path = tmp_path / "state.json"
-    write(state_path, {"collected_until_v2": "2026-10-16T23:59-03:00"})
-
-    assert audit_date_range(state_path, "v2", FRIDAY) == (
-        "16/10/2026 23:59",
-        "23/10/2026 23:59",
-    )
+def test_without_state_only_yesterday_is_pending(tmp_path):
+    assert pending_days(tmp_path / "s.json", "v1", RUN) == [date(2026, 11, 14)]
 
 
-def test_upload_is_allowed_at_or_after_next_audit_on_any_day(tmp_path):
-    state_path = tmp_path / "state.json"
-    write(state_path, {"next_audit_at_v1": "2026-10-23T23:59:00-03:00"})
-
-    assert not is_audit_due(state_path, "v1", FRIDAY - timedelta(minutes=1))
-    assert is_audit_due(state_path, "v1", FRIDAY)
-    assert is_audit_due(state_path, "v1", FRIDAY + timedelta(days=1))
+def test_day_is_only_closed_a_few_minutes_after_midnight(tmp_path):
+    just_after_midnight = datetime(2026, 11, 15, 0, 1, tzinfo=TZ)
+    assert pending_days(tmp_path / "s.json", "v1", just_after_midnight) == [date(2026, 11, 13)]
 
 
-def test_first_audit_is_allowed_without_state(tmp_path):
-    assert is_audit_due(tmp_path / "missing.json", "v1", FRIDAY)
+def test_late_run_recovers_missed_days_in_order_up_to_the_limit(tmp_path):
+    state_path = tmp_path / "s.json"
+    write(state_path, {"ultimo_dia_v1": "2026-11-09"})
+
+    assert pending_days(state_path, "v1", RUN, limit=3) == [
+        date(2026, 11, 10),
+        date(2026, 11, 11),
+        date(2026, 11, 12),
+    ]
+    assert pending_days(state_path, "v1", RUN) == [
+        date(2026, 11, 10) + timedelta(days=n) for n in range(5)
+    ]
 
 
-def test_upload_records_collected_until_and_keeps_weekday_and_time(tmp_path):
-    state_path = tmp_path / "state.json"
-    write(state_path, {"next_audit_at_v1": "2026-10-23T23:59:00-03:00"})
-    late_saturday = FRIDAY + timedelta(days=1, hours=3)
+def test_up_to_date_unit_has_nothing_pending(tmp_path):
+    state_path = tmp_path / "s.json"
+    write(state_path, {"ultimo_dia_v1": "2026-11-14"})
+    assert pending_days(state_path, "v1", RUN) == []
 
-    assert record_audit_upload(state_path, "v1", "24/10/2026 22:59", late_saturday)
+
+def test_each_unit_has_its_own_queue(tmp_path):
+    state_path = tmp_path / "s.json"
+    write(state_path, {"ultimo_dia_v1": "2026-11-14", "ultimo_dia_v2": "2026-11-12"})
+
+    assert pending_days(state_path, "v1", RUN) == []
+    assert pending_days(state_path, "v2", RUN) == [date(2026, 11, 13), date(2026, 11, 14)]
+
+
+def test_old_weekly_state_continues_on_the_sunday_after_the_last_week(tmp_path):
+    state_path = tmp_path / "s.json"
+    write(state_path, {"ultima_semana_v1": "2026-11-01", "next_audit_at_v1": "x"})
+
+    # Semana de 01/11 a 07/11 já enviada: começa no domingo 08/11
+    assert pending_days(state_path, "v1", RUN)[0] == date(2026, 11, 8)
+    assert sent_status(state_path, "v1", date(2026, 11, 7)) == ENVIADO_AGENDADO
+
+
+@pytest.mark.parametrize(
+    ("data", "day", "expected"),
+    [
+        ({"ultimo_dia_v1": "2026-11-12"}, date(2026, 11, 12), ENVIADO_AGENDADO),
+        ({"ultimo_dia_v1": "2026-11-12"}, date(2026, 11, 13), None),
+        ({"dias_avulsos_v1": ["2026-11-13"]}, date(2026, 11, 13), ENVIADO_AVULSO),
+        ({"semanas_avulsas_v1": ["2026-11-08"]}, date(2026, 11, 8), ENVIADO_SEMANA_ANTIGA),
+        ({"semanas_avulsas_v1": ["2026-11-08"]}, date(2026, 11, 14), ENVIADO_SEMANA_ANTIGA),
+        ({"semanas_avulsas_v1": ["2026-11-08"]}, date(2026, 11, 15), None),
+        ({"dias_duvidosos_v1": ["2026-11-13"]}, date(2026, 11, 13), DUVIDOSO),
+        ({"ultimo_dia_v2": "2026-11-14"}, date(2026, 11, 13), None),  # outra unidade
+    ],
+)
+def test_sent_status_blocks_every_day_already_sent(tmp_path, data, day, expected):
+    state_path = tmp_path / "s.json"
+    write(state_path, data)
+    assert sent_status(state_path, "v1", day) == expected
+
+
+def test_recording_keeps_the_other_unit_and_old_keys(tmp_path):
+    state_path = tmp_path / "s.json"
+    write(state_path, {"ultima_semana_v2": "2026-11-01", "semanas_avulsas_v1": ["2026-11-08"]})
+
+    record_scheduled_day(state_path, "v1", date(2026, 11, 14))
+    record_extra_day(state_path, "v1", date(2026, 11, 3))
+    record_extra_day(state_path, "v1", date(2026, 11, 2))
+    record_extra_day(state_path, "v1", date(2026, 11, 3))
+
     assert load_state_data(state_path) == {
-        "collected_until_v1": "2026-10-24T22:59-03:00",
-        "next_audit_at_v1": "2026-10-30T23:59-03:00",
-    }
-    assert not list(tmp_path.glob("*.tmp"))
-
-
-def test_successful_upload_migrates_legacy_schedule_fields(tmp_path):
-    state_path = tmp_path / "state.json"
-    write(
-        state_path,
-        {
-            "next_advance_at_v1": "2026-10-23T09:00:00-03:00",
-            "next_advance_at_v2": "2026-10-23T09:00:00-03:00",
-        },
-    )
-
-    assert record_audit_upload(state_path, "v1", "23/10/2026 23:59", FRIDAY)
-    assert load_state_data(state_path) == {
-        "next_advance_at_v2": "2026-10-23T09:00:00-03:00",
-        "collected_until_v1": "2026-10-23T23:59-03:00",
-        "next_audit_at_v1": "2026-10-30T09:00-03:00",
+        "ultima_semana_v2": "2026-11-01",
+        "semanas_avulsas_v1": ["2026-11-08"],
+        "ultimo_dia_v1": "2026-11-14",
+        "dias_avulsos_v1": ["2026-11-02", "2026-11-03"],
     }
 
 
-def test_upload_does_not_write_before_next_audit(tmp_path):
-    state_path = tmp_path / "state.json"
-    original = {"next_audit_at_v1": "2026-10-24T00:00:00-03:00"}
-    write(state_path, original)
+def test_doubtful_day_confirmed_in_panel_becomes_sent(tmp_path):
+    state_path = tmp_path / "s.json"
+    record_doubtful_day(state_path, "v1", date(2026, 11, 13))
+    assert doubtful_days(state_path, "v1") == [date(2026, 11, 13)]
 
-    assert not record_audit_upload(state_path, "v1", "23/10/2026 23:59", FRIDAY)
-    assert load_state_data(state_path) == original
+    resolve_doubtful_day(state_path, "v1", date(2026, 11, 13), is_in_panel=True)
+
+    assert sent_status(state_path, "v1", date(2026, 11, 13)) == ENVIADO_AVULSO
+    assert load_state_data(state_path) == {"dias_avulsos_v1": ["2026-11-13"]}
 
 
-def test_legacy_v1_next_date_is_migrated_after_upload(tmp_path):
-    state_path = tmp_path / "state.json"
-    state_path.write_text('{"next_date": "2026-10-01"}', encoding="utf-8")
+def test_doubtful_day_missing_from_panel_can_be_sent_again(tmp_path):
+    state_path = tmp_path / "s.json"
+    record_doubtful_day(state_path, "v2", date(2026, 11, 13))
 
-    assert record_audit_upload(state_path, "v1", "23/10/2026 23:59", FRIDAY)
-    assert load_state_data(state_path) == {
-        "collected_until_v1": "2026-10-23T23:59-03:00",
-        "next_audit_at_v1": "2026-10-29T00:00-03:00",
-    }
+    resolve_doubtful_day(state_path, "v2", date(2026, 11, 13), is_in_panel=False)
+
+    assert sent_status(state_path, "v2", date(2026, 11, 13)) is None
+    assert load_state_data(state_path) == {}
+
+
+def test_resolving_a_day_that_is_not_doubtful_fails(tmp_path):
+    with pytest.raises(ValueError, match="não está duvidoso"):
+        resolve_doubtful_day(tmp_path / "s.json", "v1", date(2026, 11, 13), is_in_panel=True)
 
 
 def test_malformed_json_is_not_treated_as_empty_state(tmp_path):
@@ -105,22 +147,30 @@ def test_malformed_json_is_not_treated_as_empty_state(tmp_path):
     state_path.write_text("{broken", encoding="utf-8")
 
     with pytest.raises(StateIntegrityError, match="inválido"):
-        is_audit_due(state_path, "v1", FRIDAY)
+        pending_days(state_path, "v1", RUN)
 
 
-def test_invalid_audit_timestamp_is_rejected_without_overwriting_state(tmp_path):
+def test_invalid_date_is_rejected_without_overwriting_state(tmp_path):
     state_path = tmp_path / "state.json"
-    original = '{"next_audit_at_v1": "not-a-date"}'
+    original = '{"ultimo_dia_v1": "14/11/2026"}'
     state_path.write_text(original, encoding="utf-8")
 
     with pytest.raises(StateIntegrityError, match="inválida"):
-        record_audit_upload(state_path, "v1", "23/10/2026 23:59", FRIDAY)
+        pending_days(state_path, "v1", RUN)
     assert state_path.read_text(encoding="utf-8") == original
+
+
+def test_list_keys_must_be_lists(tmp_path):
+    state_path = tmp_path / "state.json"
+    write(state_path, {"dias_avulsos_v1": "2026-11-13"})
+
+    with pytest.raises(StateIntegrityError, match="lista"):
+        sent_status(state_path, "v1", date(2026, 11, 13))
 
 
 def test_failed_temporary_write_preserves_existing_state(tmp_path, monkeypatch):
     state_path = tmp_path / "state.json"
-    original = '{"next_audit_at_v1": "2026-10-23T09:00:00-03:00"}'
+    original = '{"ultimo_dia_v1": "2026-11-10"}'
     state_path.write_text(original, encoding="utf-8")
 
     def fail_temporary_file(**kwargs):
@@ -130,10 +180,31 @@ def test_failed_temporary_write_preserves_existing_state(tmp_path, monkeypatch):
         "ponto_eletronico.state_store.tempfile.NamedTemporaryFile", fail_temporary_file
     )
     with pytest.raises(OSError, match="disk unavailable"):
-        record_audit_upload(state_path, "v1", "23/10/2026 23:59", FRIDAY)
+        record_scheduled_day(state_path, "v1", date(2026, 11, 11))
     assert state_path.read_text(encoding="utf-8") == original
 
 
 def test_unknown_version_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="desconhecida"):
-        is_audit_due(tmp_path / "state.json", "v3", FRIDAY)
+        pending_days(tmp_path / "state.json", "v3", RUN)
+
+
+def test_queue_start_on_empty_unit_recovers_from_that_day(tmp_path):
+    state_path = tmp_path / "s.json"
+    write(state_path, {"dias_avulsos_v1": ["2026-11-12", "2026-11-13"]})
+
+    set_queue_start(state_path, "v1", date(2026, 11, 12))
+
+    assert load_state_data(state_path)["ultimo_dia_v1"] == "2026-11-11"
+    assert pending_days(state_path, "v1", RUN)[0] == date(2026, 11, 12)
+    assert sent_status(state_path, "v1", date(2026, 11, 12)) == ENVIADO_AVULSO
+
+
+def test_queue_start_never_moves_back(tmp_path):
+    state_path = tmp_path / "s.json"
+    write(state_path, {"ultima_semana_v2": "2026-11-01"})  # enviado até 07/11
+
+    with pytest.raises(ValueError, match="voltar a fila"):
+        set_queue_start(state_path, "v2", date(2026, 11, 5))
+    set_queue_start(state_path, "v2", date(2026, 11, 8))
+    assert load_state_data(state_path)["ultimo_dia_v2"] == "2026-11-07"

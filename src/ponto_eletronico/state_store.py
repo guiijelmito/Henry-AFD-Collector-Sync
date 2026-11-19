@@ -1,11 +1,19 @@
 """Estado da coleta das unidades V1 e V2 (``estado_ponto.json``).
 
+Regra principal: um dia que já foi enviado ao painel nunca é enviado de novo, porque
+o painel sobrescreve os registros e as correções manuais feitas depois do envio
+seriam perdidas. Detalhes em ``docs/REGRAS.md``.
+
 Por unidade, o arquivo guarda:
 
-- ``next_audit_at_vX``: a partir de quando o upload é permitido (o "next_date");
-- ``collected_until_vX``: até que data e hora a última coleta enviada chegou.
+- ``ultimo_dia_vX``: último dia (00:00 a 23:59) enviado pela coleta agendada;
+- ``dias_avulsos_vX``: dias enviados fora da fila (``--dia``/``--semana``) ou
+  confirmados à mão depois de um envio duvidoso;
+- ``dias_duvidosos_vX``: dias cujo upload ficou sem resposta do painel. A unidade
+  para nesse dia até alguém conferir o painel e resolver.
 
-As chaves antigas ``next_advance_at_vX`` e ``next_date`` são lidas na migração.
+Chaves da coleta semanal antiga, lidas só para saber o que já foi enviado:
+``ultima_semana_vX`` (domingo da última semana enviada) e ``semanas_avulsas_vX``.
 """
 
 from __future__ import annotations
@@ -14,16 +22,29 @@ import json
 import os
 import tempfile
 from collections.abc import Mapping
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from datetime import time as datetime_time
 from pathlib import Path
 from typing import Any
 
 DATE_FORMAT = "%d/%m/%Y %H:%M"
 
+# Um dia só é considerado fechado alguns minutos depois da meia-noite, para não
+# pegar uma batida de 23:59 que o relógio ainda esteja gravando.
+MARGEM_FECHAMENTO = timedelta(minutes=2)
+
+ENVIADO_AGENDADO = "enviado pela coleta agendada"
+ENVIADO_AVULSO = "enviado fora da fila ou confirmado à mão"
+ENVIADO_SEMANA_ANTIGA = "enviado pela coleta semanal antiga"
+DUVIDOSO = "envio duvidoso aguardando conferência no painel"
+
 
 class StateIntegrityError(ValueError):
     """O arquivo de estado existe, mas não pode ser interpretado com segurança."""
+
+
+class DiaDuvidosoPendente(RuntimeError):
+    """A fila da unidade parou num dia com envio duvidoso que ainda não foi conferido."""
 
 
 def load_state_data(path: str | Path) -> dict[str, Any]:
@@ -52,97 +73,169 @@ def _check_version(version: str) -> None:
         raise ValueError(f"Versão de relógio desconhecida: {version}")
 
 
-def _parse_moment(value: Any, tzinfo) -> datetime:
-    """Aceita data ISO (2026-10-30) ou data e hora ISO (2026-10-30T23:59:00-03:00)."""
+def _parse_date(value: Any) -> date:
+    """Aceita data ISO (2026-10-30) ou data e hora ISO; só a data importa."""
     if not isinstance(value, str):
         raise StateIntegrityError("Datas do estado devem ser texto ISO-8601")
     try:
         if len(value) == 10:
-            moment = datetime.combine(
-                datetime.strptime(value, "%Y-%m-%d").date(), datetime_time.min
-            )
-        else:
-            moment = datetime.fromisoformat(value)
+            return date.fromisoformat(value)
+        return datetime.fromisoformat(value).date()
     except ValueError as exc:
         raise StateIntegrityError(f"Data inválida no estado: {value!r}") from exc
-    if moment.tzinfo is None:
-        return moment.replace(tzinfo=tzinfo)
-    return moment.astimezone(tzinfo)
 
 
-def _next_audit(data: Mapping[str, Any], version: str, tzinfo) -> datetime | None:
-    value = data.get(f"next_audit_at_{version}")
-    if value is None:
-        value = data.get(f"next_advance_at_{version}")
-    if value is None and version == "v1":
-        value = data.get("next_date")
-    return None if value is None else _parse_moment(value, tzinfo)
+def _date_list(data: Mapping[str, Any], key: str) -> list[date]:
+    values = data.get(key, [])
+    if not isinstance(values, list):
+        raise StateIntegrityError(f"{key} deve ser uma lista de datas")
+    return [_parse_date(value) for value in values]
 
 
-def is_audit_due(
-    path: str | Path,
-    version: str,
-    now: datetime | None = None,
-) -> bool:
-    """O upload é permitido no horário do next_audit_at da unidade ou depois dele."""
+def day_range(day: date) -> tuple[str, str]:
+    """Período do filtro do relógio: o dia das 00:00 às 23:59."""
+    start = datetime.combine(day, datetime_time.min)
+    end = start + timedelta(days=1) - timedelta(minutes=1)
+    return start.strftime(DATE_FORMAT), end.strftime(DATE_FORMAT)
+
+
+def _last_closed_day(now: datetime) -> date:
+    return (now - MARGEM_FECHAMENTO).date() - timedelta(days=1)
+
+
+def _last_scheduled_day(data: Mapping[str, Any], version: str) -> date | None:
+    """Último dia da fila agendada, migrando da coleta semanal quando preciso."""
+    value = data.get(f"ultimo_dia_{version}")
+    if value is not None:
+        return _parse_date(value)
+    last_week = data.get(f"ultima_semana_{version}")
+    if last_week is not None:
+        # A semana antiga ia de domingo a sábado: o sábado foi o último dia enviado
+        return _parse_date(last_week) + timedelta(days=6)
+    return None
+
+
+def sent_status(path: str | Path, version: str, day: date) -> str | None:
+    """Diz por que o dia não pode ser enviado, ou ``None`` se ele nunca foi enviado."""
     _check_version(version)
-    current_time = _current_time(now)
-    due_at = _next_audit(load_state_data(path), version, current_time.tzinfo)
-    return due_at is None or current_time >= due_at
-
-
-def audit_date_range(
-    path: str | Path,
-    version: str,
-    now: datetime | None = None,
-) -> tuple[str, str]:
-    """Período a coletar: de onde a última coleta parou (ou segunda 00:00) até agora.
-
-    Começar onde a anterior parou garante que nenhuma marcação fique de fora,
-    mesmo que uma coleta atrase ou falhe por alguns dias.
-    """
-    _check_version(version)
-    current_time = _current_time(now)
-    collected_until = load_state_data(path).get(f"collected_until_{version}")
-    if collected_until is None:
-        start = (current_time - timedelta(days=current_time.weekday())).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-    else:
-        start = _parse_moment(collected_until, current_time.tzinfo)
-    return start.strftime(DATE_FORMAT), current_time.strftime(DATE_FORMAT)
-
-
-def record_audit_upload(
-    path: str | Path,
-    version: str,
-    collected_until: str,
-    now: datetime | None = None,
-) -> bool:
-    """Após upload bem-sucedido, guarda até onde coletou e agenda a próxima auditoria.
-
-    A próxima auditoria anda de 7 em 7 dias a partir da anterior, mantendo o dia
-    e a hora configurados (ex.: toda sexta às 23:59) mesmo se esta coleta atrasou.
-    """
-    _check_version(version)
-    current_time = _current_time(now)
     data = load_state_data(path)
-    due_at = _next_audit(data, version, current_time.tzinfo)
-    if due_at is not None and current_time < due_at:
-        return False
+    if day in _date_list(data, f"dias_duvidosos_{version}"):
+        return DUVIDOSO
+    last_scheduled = _last_scheduled_day(data, version)
+    if last_scheduled is not None and day <= last_scheduled:
+        return ENVIADO_AGENDADO
+    if day in _date_list(data, f"dias_avulsos_{version}"):
+        return ENVIADO_AVULSO
+    for sunday in _date_list(data, f"semanas_avulsas_{version}"):
+        if sunday <= day <= sunday + timedelta(days=6):
+            return ENVIADO_SEMANA_ANTIGA
+    return None
 
-    next_audit = due_at or current_time
-    while next_audit <= current_time:
-        next_audit += timedelta(days=7)
 
-    end = datetime.strptime(collected_until, DATE_FORMAT).replace(tzinfo=current_time.tzinfo)
-    data[f"collected_until_{version}"] = end.isoformat(timespec="minutes")
-    data[f"next_audit_at_{version}"] = next_audit.isoformat(timespec="minutes")
-    data.pop(f"next_advance_at_{version}", None)
-    if version == "v1":
-        data.pop("next_date", None)
+def pending_days(
+    path: str | Path,
+    version: str,
+    now: datetime | None = None,
+    limit: int | None = None,
+) -> list[date]:
+    """Dias fechados da fila agendada da unidade, em ordem, a partir do último enviado.
+
+    Sem nenhum registro, começa em ontem (não tenta adivinhar dias antigos). A lista
+    inclui dias que já foram enviados fora da fila ou estão duvidosos: quem chama
+    confere cada um com :func:`sent_status` antes de enviar.
+    """
+    _check_version(version)
+    yesterday = _last_closed_day(_current_time(now))
+    last_scheduled = _last_scheduled_day(load_state_data(path), version)
+    day = yesterday if last_scheduled is None else last_scheduled + timedelta(days=1)
+
+    days = []
+    while day <= yesterday and (limit is None or len(days) < limit):
+        days.append(day)
+        day += timedelta(days=1)
+    return days
+
+
+def set_queue_start(path: str | Path, version: str, first_day: date) -> None:
+    """Define o primeiro dia que a fila agendada da unidade vai considerar.
+
+    Só avança a fila: voltar o ``ultimo_dia`` tiraria a proteção de dias já enviados.
+    Os dias a partir de ``first_day`` continuam sendo conferidos um a um antes do envio.
+    """
+    _check_version(version)
+    data = load_state_data(path)
+    new_last = first_day - timedelta(days=1)
+    current = _last_scheduled_day(data, version)
+    if current is not None and new_last < current:
+        raise ValueError(
+            f"A fila da unidade {version.upper()} já está em {current.isoformat()}; "
+            "voltar a fila poderia reenviar dias"
+        )
+    data[f"ultimo_dia_{version}"] = new_last.isoformat()
     write_state_data(path, data)
+
+
+def record_scheduled_day(path: str | Path, version: str, day: date) -> None:
+    """Avança a fila agendada até o dia informado (enviado ou já enviado antes)."""
+    _check_version(version)
+    data = load_state_data(path)
+    data[f"ultimo_dia_{version}"] = day.isoformat()
+    write_state_data(path, data)
+
+
+def _add_to_list(data: dict[str, Any], key: str, day: date) -> None:
+    values = data.setdefault(key, [])
+    if not isinstance(values, list):
+        raise StateIntegrityError(f"{key} deve ser uma lista de datas")
+    if day.isoformat() not in values:
+        values.append(day.isoformat())
+        values.sort()
+
+
+def _remove_from_list(data: dict[str, Any], key: str, day: date) -> bool:
+    values = data.get(key, [])
+    if not isinstance(values, list) or day.isoformat() not in values:
+        return False
+    values.remove(day.isoformat())
+    if not values:
+        data.pop(key)
     return True
+
+
+def record_extra_day(path: str | Path, version: str, day: date) -> None:
+    """Guarda um dia enviado fora da fila do agendamento."""
+    _check_version(version)
+    data = load_state_data(path)
+    _add_to_list(data, f"dias_avulsos_{version}", day)
+    write_state_data(path, data)
+
+
+def record_doubtful_day(path: str | Path, version: str, day: date) -> None:
+    """Guarda um dia cujo upload ficou sem resposta: ele não será reenviado sozinho."""
+    _check_version(version)
+    data = load_state_data(path)
+    _add_to_list(data, f"dias_duvidosos_{version}", day)
+    write_state_data(path, data)
+
+
+def doubtful_days(path: str | Path, version: str) -> list[date]:
+    _check_version(version)
+    return _date_list(load_state_data(path), f"dias_duvidosos_{version}")
+
+
+def resolve_doubtful_day(path: str | Path, version: str, day: date, *, is_in_panel: bool) -> None:
+    """Resolve um dia duvidoso depois da conferência no painel.
+
+    ``is_in_panel=True``: o dia está no painel, então ele vira enviado e nunca sobe de
+    novo. ``False``: o dia não chegou ao painel e volta a poder ser enviado.
+    """
+    _check_version(version)
+    data = load_state_data(path)
+    if not _remove_from_list(data, f"dias_duvidosos_{version}", day):
+        raise ValueError(f"O dia {day.isoformat()} não está duvidoso na unidade {version.upper()}")
+    if is_in_panel:
+        _add_to_list(data, f"dias_avulsos_{version}", day)
+    write_state_data(path, data)
 
 
 def write_state_data(path: str | Path, data: Mapping[str, Any]) -> None:
